@@ -1,0 +1,14 @@
+fastapi
+uvicorn[standard]
+sqlalchemy
+pydantic
+pydantic-settings
+litellm
+sqlmodel
+tenacity
+curl-cffi
+selectolax
+aiosmtplib
+python-multipart
+aiofiles
+pymupdf
