@@ -43,9 +43,9 @@ export function AddJobModal({ children }: { children?: React.ReactNode }) {
     <Dialog open={open} onOpenChange={setOpen}>
       <DialogTrigger asChild>
         {children || (
-          <Button className="w-full h-12 rounded-xl shadow-lg hover:shadow-xl transition-all flex items-center justify-center gap-2">
+          <Button variant="secondary" className="w-full h-12 rounded-xl transition-all flex items-center justify-center gap-2 text-muted-foreground hover:text-foreground">
             <Search className="w-4 h-4" />
-            <span>Zanalyzovat pozici</span>
+            <span>Zanalyzovat pozici (URL)</span>
           </Button>
         )}
       </DialogTrigger>

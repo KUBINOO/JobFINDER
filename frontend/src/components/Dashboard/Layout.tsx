@@ -7,6 +7,7 @@ import { cn } from "../../lib/utils"
 import { DetailPanel } from "./DetailPanel"
 import { PipelineBoard } from "./PipelineBoard"
 import { AddJobModal } from "./AddJobModal"
+import { ExploreModal } from "./ExploreModal"
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query"
 import axios from "axios"
 
@@ -129,7 +130,8 @@ export function DashboardLayout() {
                     <Badge count={jobs.length} />
                   </div>
                   
-                  <div className="mb-4">
+                  <div className="mb-4 space-y-3">
+                    <ExploreModal />
                     <AddJobModal />
                   </div>
                 </div>

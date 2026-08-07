@@ -14,6 +14,52 @@ class ApplicationCreate(BaseModel):
 class ApplicationStatusUpdate(BaseModel):
     status: ApplicationStatus
 
+class ExploreRequest(BaseModel):
+    count: int
+    query: Optional[str] = ""
+
+@router.post("/explore")
+async def explore_jobs(explore_req: ExploreRequest, background_tasks: BackgroundTasks, session: Session = Depends(get_session)):
+    user = session.get(User, 1)
+    if not user:
+        user = User(first_name="Demo", last_name="User", email="demo@example.com")
+        session.add(user)
+        session.commit()
+        session.refresh(user)
+
+    from scrapers.search import JobSearchScraper
+    scraper = JobSearchScraper()
+    job_urls = await scraper.search_jobs(query=explore_req.query, count=explore_req.count)
+
+    if not job_urls:
+        raise HTTPException(status_code=404, detail="Žádné pozice nebyly nalezeny pro zadané klíčové slovo.")
+
+    created_apps = []
+    
+    for url in job_urls:
+        job = session.exec(select(JobPosting).where(JobPosting.source_url == url)).first()
+        if not job:
+            job = JobPosting(source_url=url, title="Zatím nenačteno", company_name="Zatím nenačteno")
+            session.add(job)
+            session.commit()
+            session.refresh(job)
+        
+        application = session.exec(select(Application).where(Application.job_id == job.id).where(Application.user_id == user.id)).first()
+        if not application:
+            application = Application(user_id=user.id, job_id=job.id, status=ApplicationStatus.PENDING)
+        else:
+            application.status = ApplicationStatus.PENDING
+            application.error_logs = None
+
+        session.add(application)
+        session.commit()
+        session.refresh(application)
+
+        background_tasks.add_task(process_job_application, application.id)
+        created_apps.append(application.id)
+
+    return {"message": f"Nalezeno {len(job_urls)} pozic. Spouštím analýzu.", "count": len(job_urls), "urls": job_urls}
+
 @router.get("/", response_model=List[dict])
 def get_applications(session: Session = Depends(get_session)):
     applications = session.exec(select(Application)).all()

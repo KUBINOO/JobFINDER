@@ -12,3 +12,4 @@ aiosmtplib
 python-multipart
 aiofiles
 pymupdf
+
