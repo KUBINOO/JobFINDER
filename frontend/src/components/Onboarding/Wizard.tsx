@@ -420,7 +420,7 @@ function Step3API({ formData, setFormData }: any) {
                 <option value="465" className="bg-background text-foreground">465 (SSL)</option>
               </select>
             </div>
-            <div className="grid grid-cols-1 gap-4">
+            <div className="grid grid-cols-1 gap-2">
               <Input 
                 placeholder="Heslo / App Password" 
                 type="password" 
@@ -428,6 +428,11 @@ function Step3API({ formData, setFormData }: any) {
                 onChange={(e) => setFormData({...formData, smtp_password: e.target.value})}
                 className="h-11 bg-white/40 dark:bg-black/20" 
               />
+              <div className="border-l-4 border-blue-500 bg-blue-50/50 dark:bg-blue-900/20 p-3 rounded-r-lg mt-1">
+                <p className="text-sm text-blue-900 dark:text-blue-200">
+                  <strong>Důležité:</strong> Nezadávejte sem své běžné heslo k účtu (např. k Gmailu). Kvůli dvoufázovému ověření (2FA) je nutné ve vašem účtu vygenerovat speciální <strong>Heslo pro aplikace (App Password)</strong> určené přímo pro tento nástroj.
+                </p>
+              </div>
             </div>
           </div>
         </div>

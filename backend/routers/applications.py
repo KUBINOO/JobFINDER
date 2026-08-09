@@ -132,3 +132,17 @@ def delete_application(app_id: int, session: Session = Depends(get_session)):
     session.delete(application)
     session.commit()
     return {"message": "Application deleted"}
+
+@router.delete("/action/wipe")
+def wipe_applications(session: Session = Depends(get_session)):
+    # Delete all applications and job postings securely
+    applications = session.exec(select(Application)).all()
+    for app in applications:
+        session.delete(app)
+        
+    jobs = session.exec(select(JobPosting)).all()
+    for job in jobs:
+        session.delete(job)
+        
+    session.commit()
+    return {"message": "Historie žádostí byla úspěšně smazána."}

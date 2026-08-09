@@ -19,6 +19,8 @@ class JobAnalysisResult(BaseModel):
 from typing import Optional
 
 class PreferencesUpdate(BaseModel):
+    full_name: Optional[str] = None
+    phone_number: Optional[str] = None
     age: Optional[int] = None
     education: Optional[str] = None
     industry: Optional[str] = None
@@ -27,6 +29,10 @@ class PreferencesUpdate(BaseModel):
     llm_model: str
     llm_api_key: Optional[str] = None
     ollama_host: Optional[str] = None
+    tone_of_voice: Optional[str] = "formal"
+    custom_prompt: Optional[str] = None
     smtp_email: str
     smtp_password: str
     smtp_port: int
+    scraper_delay_min: Optional[float] = 2.0
+    scraper_delay_max: Optional[float] = 5.0

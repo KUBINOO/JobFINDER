@@ -45,3 +45,28 @@ def get_settings(session: Session = Depends(get_session)):
     if not user_prefs:
         raise HTTPException(status_code=404, detail="Nastavení nenalezeno")
     return user_prefs
+
+from pydantic import BaseModel
+import aiosmtplib
+
+class SmtpTestRequest(BaseModel):
+    host: str = "smtp.gmail.com"
+    port: int
+    username: str
+    password: str
+
+@router.post("/api/settings/test-smtp")
+async def test_smtp(req: SmtpTestRequest):
+    try:
+        smtp = aiosmtplib.SMTP(
+            hostname=req.host, 
+            port=req.port,
+            use_tls=req.port == 465,
+            start_tls=req.port == 587
+        )
+        await smtp.connect()
+        await smtp.login(req.username, req.password)
+        await smtp.quit()
+        return {"message": "Připojení k SMTP bylo úspěšné!"}
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=f"Chyba SMTP: {str(e)}")

@@ -2,7 +2,7 @@ import React, { useState } from "react"
 import { JobCard, Job, JobStatus } from "./JobCard"
 import { ScrollArea } from "../ui/scroll-area"
 import { Button } from "../ui/button"
-import { Search, History, Settings, Send, RefreshCw, Briefcase, LayoutDashboard, ListTodo } from "lucide-react"
+import { Search, History, Settings, Send, RefreshCw, Briefcase, LayoutDashboard, ListTodo, Sun, Moon } from "lucide-react"
 import { cn } from "../../lib/utils"
 import { DetailPanel } from "./DetailPanel"
 import { PipelineBoard } from "./PipelineBoard"
@@ -10,6 +10,8 @@ import { AddJobModal } from "./AddJobModal"
 import { ExploreModal } from "./ExploreModal"
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query"
 import axios from "axios"
+import { SettingsLayout } from "../Settings/SettingsLayout"
+import { useTheme } from "../ThemeProvider"
 
 const API_BASE = "http://localhost:8000/api"
 
@@ -18,7 +20,7 @@ export function DashboardLayout() {
   const [viewMode, setViewMode] = useState<"master-detail" | "pipeline">("master-detail")
   const [selectedJobId, setSelectedJobId] = useState<string | null>(null)
   
-
+  const { theme, setTheme } = useTheme()
   const queryClient = useQueryClient()
 
   // Fetch jobs
@@ -87,13 +89,24 @@ export function DashboardLayout() {
           <SidebarIcon icon={<History />} active={activeTab === "history"} onClick={() => setActiveTab("history")} tooltip="Historie" />
         </div>
 
-        <SidebarIcon icon={<Settings />} active={activeTab === "settings"} onClick={() => setActiveTab("settings")} tooltip="Nastavení" />
+        <div className="flex flex-col gap-4 mb-4">
+          <SidebarIcon 
+            icon={theme === "dark" ? <Sun /> : <Moon />} 
+            onClick={() => setTheme(theme === "dark" ? "light" : "dark")} 
+            tooltip="Přepnout motiv" 
+          />
+          <SidebarIcon icon={<Settings />} active={activeTab === "settings"} onClick={() => setActiveTab("settings")} tooltip="Nastavení" />
+        </div>
       </div>
 
       {/* ZBYTEK OBRAZOVKY S PŘEPÍNAČEM */}
       <div className="flex-1 flex flex-col">
-        {/* Top-level Navigation / Tabs */}
-        <div className="h-16 flex items-center px-6 border-b border-white/20 dark:border-white/10 bg-white/30 dark:bg-black/20 backdrop-blur-xl z-20 shrink-0 gap-4">
+        {activeTab === "settings" ? (
+          <SettingsLayout />
+        ) : (
+          <>
+            {/* Top-level Navigation / Tabs */}
+            <div className="h-16 flex items-center px-6 border-b border-white/20 dark:border-white/10 bg-white/30 dark:bg-black/20 backdrop-blur-xl z-20 shrink-0 gap-4">
           <div className="flex p-1 bg-black/5 dark:bg-white/10 rounded-xl">
             <button
               onClick={() => setViewMode("master-detail")}
@@ -169,6 +182,8 @@ export function DashboardLayout() {
             }} onDeleteJob={handleDeleteJob} />
           )}
         </div>
+          </>
+        )}
       </div>
     </div>
   )
