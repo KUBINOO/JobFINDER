@@ -32,7 +32,9 @@ export function SettingsLayout() {
       alert("Nastavení bylo úspěšně uloženo.")
     },
     onError: (err: any) => {
-      alert("Chyba při ukládání nastavení: " + err.message)
+      const detail = err.response?.data?.detail;
+      const errorMsg = Array.isArray(detail) ? JSON.stringify(detail) : detail || err.message;
+      alert("Chyba při ukládání nastavení: " + errorMsg)
     }
   })
 
@@ -70,11 +72,17 @@ export function SettingsLayout() {
   const handleSave = (e: React.FormEvent<HTMLFormElement>) => {
     e.preventDefault()
     const formData = new FormData(e.currentTarget)
-    const data = Object.fromEntries(formData.entries())
-    
-    if (data.smtp_port) data.smtp_port = parseInt(data.smtp_port as string, 10)
-    if (data.scraper_delay_min) data.scraper_delay_min = parseFloat(data.scraper_delay_min as string)
-    if (data.scraper_delay_max) data.scraper_delay_max = parseFloat(data.scraper_delay_max as string)
+    const data: Record<string, any> = Object.fromEntries(formData.entries())
+
+    if (data.smtp_port !== undefined) {
+      data.smtp_port = data.smtp_port === "" ? null : parseInt(data.smtp_port as string, 10)
+    }
+    if (data.scraper_delay_min !== undefined) {
+      data.scraper_delay_min = data.scraper_delay_min === "" ? null : parseFloat(data.scraper_delay_min as string)
+    }
+    if (data.scraper_delay_max !== undefined) {
+      data.scraper_delay_max = data.scraper_delay_max === "" ? null : parseFloat(data.scraper_delay_max as string)
+    }
 
     const finalSettings = { ...settings, ...data }
     updateMutation.mutate(finalSettings)
@@ -123,8 +131,8 @@ export function SettingsLayout() {
               key={tab.id}
               onClick={() => setActiveTab(tab.id)}
               className={`flex items-center gap-3 px-4 py-3 rounded-xl transition-all text-sm font-medium
-                ${isActive 
-                  ? "bg-black text-white dark:bg-white dark:text-black shadow-md" 
+                ${isActive
+                  ? "bg-black text-white dark:bg-white dark:text-black shadow-md"
                   : "text-muted-foreground hover:bg-black/5 dark:hover:bg-white/10 hover:text-foreground"
                 }`}
             >

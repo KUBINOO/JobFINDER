@@ -35,8 +35,23 @@ class CzechJobScraper(AbstractCSSScraper):
                     # Pokus o extrakci titulku z Jina AI (Title: ...)
                     if "Title: " in jina_text:
                         jina_title = jina_text.split("Title: ")[1].split("\n")[0].strip()
-                        if jina_title and title == "Neznámá pozice":
-                            title = jina_title
+                        if jina_title:
+                            # 1. Zkusíme extrahovat název společnosti z titulku
+                            if not company or company == "Neznámá společnost":
+                                for sep in [" – ", " - ", " | ", " at "]:
+                                    if sep in jina_title:
+                                        parts = jina_title.split(sep)
+                                        # Poslední část je většinou název společnosti
+                                        potential_company = parts[-1].strip()
+                                        if potential_company:
+                                            company = potential_company
+                                            # Volitelně ořízneme title, aby neobsahoval název společnosti
+                                            jina_title = sep.join(parts[:-1]).strip()
+                                        break
+                                        
+                            # 2. Aktualizujeme samotný název pozice
+                            if not title or title == "Neznámá pozice":
+                                title = jina_title
                             
                     description = jina_text
                 except Exception as jina_e:

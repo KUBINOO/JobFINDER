@@ -132,7 +132,13 @@ async def process_job_application(application_id: int) -> None:
     Hlavní Orchestrator běžící na pozadí pomocí FastAPI BackgroundTasks.
     Explicitně vytváří vlastní izolovanou databázovou session pro bezpečné řízení stavů.
     """
-    logger.info(f"Spouštím zpracování na pozadí pro žádost {application_id}")
+    import asyncio
+    import random
+    
+    # Rozprostření zátěže (1-15 sekund) pro prevenci Rate Limitů u Jina AI a LLM API
+    delay = random.uniform(1, 15)
+    logger.info(f"Spouštím zpracování na pozadí pro žádost {application_id} se zpožděním {delay:.1f}s")
+    await asyncio.sleep(delay)
     
     # Krok 1 (Kritický požadavek): Nezávislá izolovaná DB Session pomocí context manageru
     with Session(engine) as session:

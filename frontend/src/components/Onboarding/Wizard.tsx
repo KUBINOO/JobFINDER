@@ -38,14 +38,11 @@ export function OnboardingWizard({ onComplete }: { onComplete: () => void }) {
       if (cvFile) {
         const fileData = new FormData()
         fileData.append("file", cvFile)
-        await apiClient.post("/upload-cv", fileData, {
-          headers: {
-            "Content-Type": "multipart/form-data",
-          },
-        })
+        await apiClient.post("/upload-cv", fileData)
       }
 
       const payload = {
+        full_name: formData.name || null,
         age: formData.age ? parseInt(formData.age, 10) : null,
         education: formData.education || null,
         industry: formData.industry || null,

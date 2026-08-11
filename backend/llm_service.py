@@ -38,8 +38,8 @@ class CoverLetterGenerator:
         )
 
     @retry(
-        stop=stop_after_attempt(2), # 1 první pokus + 1 opakování = max 2 pokusy
-        wait=wait_exponential(multiplier=1, min=2, max=10),
+        stop=stop_after_attempt(5), # 1 první pokus + 4 opakování = max 5 pokusů pro obejití Rate Limitu
+        wait=wait_exponential(multiplier=2, min=15, max=60),
         retry=retry_if_exception_type(Exception),
         reraise=True
     )
