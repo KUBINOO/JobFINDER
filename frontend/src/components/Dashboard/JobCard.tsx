@@ -16,6 +16,7 @@ export interface Job {
   description?: string
   generated_subject?: string
   generated_body?: string
+  error_logs?: string
 }
 
 interface JobCardProps {

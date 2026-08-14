@@ -1,4 +1,3 @@
-import React from "react"
 import { Job, JobStatus } from "./JobCard"
 import { ScrollArea } from "../ui/scroll-area"
 import { Button } from "../ui/button"
@@ -77,6 +76,13 @@ export function DetailPanel({ job, onStatusChange }: DetailPanelProps) {
                   <h4 className="font-semibold text-sm">AI Hodnocení (Match Score)</h4>
                   <p className="text-muted-foreground mt-1 text-sm">{job.match_reason}</p>
                 </div>
+              </div>
+            )}
+
+            {job.status === "Failed" && job.error_logs && (
+              <div className="mt-6 p-4 rounded-xl border border-red-500/30 bg-red-500/10 text-red-700 dark:text-red-300 text-sm flex flex-col gap-1">
+                <span className="font-semibold">Chyba zpracování inzerátu:</span>
+                <p className="whitespace-pre-wrap">{job.error_logs}</p>
               </div>
             )}
           </div>

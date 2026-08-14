@@ -4,7 +4,7 @@ from sqlmodel import Session
 from database import engine, create_db_and_tables
 from routers import settings, upload, applications
 
-# Initialize SQLite database tables
+# Inicializace databáze SQLite
 create_db_and_tables()
 
 app = FastAPI(title="Job Application Automation API")

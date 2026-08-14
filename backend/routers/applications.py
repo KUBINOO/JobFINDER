@@ -17,6 +17,7 @@ class ApplicationStatusUpdate(BaseModel):
 class ExploreRequest(BaseModel):
     count: int
     query: Optional[str] = ""
+    sources: Optional[List[str]] = None
 
 @router.post("/explore")
 async def explore_jobs(explore_req: ExploreRequest, background_tasks: BackgroundTasks, session: Session = Depends(get_session)):
@@ -29,7 +30,11 @@ async def explore_jobs(explore_req: ExploreRequest, background_tasks: Background
 
     from scrapers.search import JobSearchScraper
     scraper = JobSearchScraper()
-    job_urls = await scraper.search_jobs(query=explore_req.query, count=explore_req.count)
+    job_urls = await scraper.search_jobs(
+        query=explore_req.query, 
+        count=explore_req.count,
+        sources=explore_req.sources
+    )
 
     if not job_urls:
         raise HTTPException(status_code=404, detail="Žádné pozice nebyly nalezeny pro zadané klíčové slovo.")
@@ -77,6 +82,7 @@ def get_applications(session: Session = Depends(get_session)):
             "match_reason": app.match_reason,
             "generated_subject": app.generated_subject,
             "generated_body": app.generated_body,
+            "error_logs": app.error_logs,
         })
     return result
 

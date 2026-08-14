@@ -1,5 +1,6 @@
 import os
 import logging
+import asyncio
 from typing import Optional
 from tenacity import retry, stop_after_attempt, wait_exponential, retry_if_exception_type
 from litellm import acompletion
@@ -8,6 +9,9 @@ from pydantic import ValidationError
 from schemas import JobAnalysisResult
 
 logger = logging.getLogger(__name__)
+
+# Globální semafor pro řízení souběžných volání LLM (ochrana před 429 Rate Limit)
+_llm_semaphore = asyncio.Semaphore(1)
 
 class LLMGenerationError(Exception):
     """Vlastní výjimka pro chyby při generování přes LLM."""
@@ -38,8 +42,8 @@ class CoverLetterGenerator:
         )
 
     @retry(
-        stop=stop_after_attempt(5), # 1 první pokus + 4 opakování = max 5 pokusů pro obejití Rate Limitu
-        wait=wait_exponential(multiplier=2, min=15, max=60),
+        stop=stop_after_attempt(5),
+        wait=wait_exponential(multiplier=2, min=10, max=45),
         retry=retry_if_exception_type(Exception),
         reraise=True
     )
@@ -56,30 +60,33 @@ class CoverLetterGenerator:
             {"role": "user", "content": user_prompt}
         ]
 
-        try:
-            logger.info(f"Volání LLM ({self.model}) pro vygenerování e-mailu pro pozici {job_title}")
-            response = await acompletion(
-                model=self.model,
-                messages=messages,
-                response_format=JobAnalysisResult,
-                temperature=0.3 # Nastavení teploty na 0.3 pro vysokou faktickou konzistenci
-            )
-            
-            # litellm s response_format=PydanticModel zajistí JSON výstup.
-            # Zpracujeme vrácený text pro zajištění přesné shody s JobAnalysisResult.
-            content = response.choices[0].message.content
-            if not content:
-                raise ValueError("LLM vrátilo prázdný obsah odpovědi.")
+        async with _llm_semaphore:
+            # Krátká prodleva pro zabránění burst 429 chybám
+            await asyncio.sleep(2)
+            try:
+                logger.info(f"Volání LLM ({self.model}) pro vygenerování e-mailu pro pozici {job_title}")
+                response = await acompletion(
+                    model=self.model,
+                    messages=messages,
+                    response_format=JobAnalysisResult,
+                    temperature=0.3 # Nastavení teploty na 0.3 pro vysokou faktickou konzistenci
+                )
                 
-            return JobAnalysisResult.model_validate_json(content)
-        
-        except ValidationError as ve:
-            logger.error(f"Nepodařilo se naparsovat odpověď z LLM jako JobAnalysisResult: {ve}")
-            raise LLMGenerationError("LLM vrátilo neplatné schéma") from ve
-        except Exception as e:
-            logger.error(f"Volání LLM API selhalo: {e}")
-            # Tato výjimka je zachycena knihovnou tenacity pro opakování
-            raise LLMGenerationError(f"Generování přes LLM selhalo: {e}") from e
+                # litellm s response_format=PydanticModel zajistí JSON výstup.
+                # Zpracujeme vrácený text pro zajištění přesné shody s JobAnalysisResult.
+                content = response.choices[0].message.content
+                if not content:
+                    raise ValueError("LLM vrátilo prázdný obsah odpovědi.")
+                    
+                return JobAnalysisResult.model_validate_json(content)
+            
+            except ValidationError as ve:
+                logger.error(f"Nepodařilo se naparsovat odpověď z LLM jako JobAnalysisResult: {ve}")
+                raise LLMGenerationError("LLM vrátilo neplatné schéma") from ve
+            except Exception as e:
+                logger.error(f"Volání LLM API selhalo: {e}")
+                # Tato výjimka je zachycena knihovnou tenacity pro opakování
+                raise LLMGenerationError(f"Generování přes LLM selhalo: {e}") from e
 
     async def generate_email(self, user_cv: str, job_desc: str, job_title: str) -> JobAnalysisResult:
         """

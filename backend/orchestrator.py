@@ -13,8 +13,14 @@ from utils.pdf_parser import extract_text_from_pdf
 
 logger = logging.getLogger(__name__)
 
+class JobContentValidationError(Exception):
+    """Výjimka vyvolaná, pokud inzerát neobsahuje dostatečný nebo čitelný popis."""
+    pass
+
 async def _run_scraping(session: Session, application: Application) -> None:
-    """Krok 1: Získání dat z pracovního inzerátu (Scraping)."""
+    """
+    Krok 1: Získání dat z pracovního inzerátu (Scraping) a validace obsahu (Quality Gate).
+    """
     job = application.job_posting
     scraper = get_scraper(job.source_url)
     scraped_job = await scraper.extract_job_details(job.source_url)
@@ -27,6 +33,16 @@ async def _run_scraping(session: Session, application: Application) -> None:
     
     session.add(job)
     session.commit()
+
+    # Kontrola kvality (Quality Gate): Počet znaků a čitelnost popisu
+    cleaned_desc = (job.description or "").strip()
+    if len(cleaned_desc) < 150:
+        logger.warning(
+            f"Inzerát {job.source_url} má nedostatečný popis ({len(cleaned_desc)} znaků). Zastavuji pipeline."
+        )
+        raise JobContentValidationError(
+            "Inzerát neobsahuje čitelný popis pracovní pozice (pravděpodobně dynamický JavaScript nebo externí kariérní stránka)."
+        )
 
 async def _run_llm_generation(session: Session, application: Application) -> None:
     """Krok 2 a 3: Vygenerování e-mailu pomocí LLM a sestavení výsledného textu."""
@@ -43,18 +59,18 @@ async def _run_llm_generation(session: Session, application: Application) -> Non
             logger.info(f"Úspěšně extrahován text z CV PDF: {user_prefs.cv_file_path}")
         except Exception as e:
             logger.error(f"Nepodařilo se extrahovat text z PDF: {e}")
-            raise # Re-raise, as requested: "Include error handling... raise a clear exception" or rather let it fail the background job so we know
+            raise
     
     import os
     llm_model = None
     if user_prefs:
         llm_model = user_prefs.llm_model
         
-        # Map deprecated gemini models to their latest versions to prevent 404 errors
-        if llm_model == "gemini-1.5-flash":
-            llm_model = "gemini-flash-latest"
-        elif llm_model == "gemini-1.5-pro":
-            llm_model = "gemini-pro-latest"
+        # Mapování modelů na aktuální verze
+        if llm_model in ["gemini-1.5-flash", "gemini-flash-latest"]:
+            llm_model = "gemini-1.5-flash"
+        elif llm_model in ["gemini-1.5-pro", "gemini-pro-latest"]:
+            llm_model = "gemini-1.5-pro"
 
         if user_prefs.llm_provider == "Google Gemini":
             if not llm_model.startswith("gemini/"):
@@ -140,7 +156,7 @@ async def process_job_application(application_id: int) -> None:
     logger.info(f"Spouštím zpracování na pozadí pro žádost {application_id} se zpožděním {delay:.1f}s")
     await asyncio.sleep(delay)
     
-    # Krok 1 (Kritický požadavek): Nezávislá izolovaná DB Session pomocí context manageru
+    # Nezávislá izolovaná DB Session pomocí context manageru
     with Session(engine) as session:
         application = session.get(Application, application_id)
         if not application:
@@ -181,14 +197,29 @@ async def process_job_application(application_id: int) -> None:
             
             logger.info(f"Úspěšně dokončeno zpracování žádosti {application_id}.")
             
+        except JobContentValidationError as val_err:
+            # Specifické ošetření Quality Gate selhání popisu inzerátu
+            logger.warning(f"Quality gate selhala pro žádost {application_id}: {val_err}")
+            session.rollback()
+            
+            application.status = ApplicationStatus.FAILED
+            application.error_logs = str(val_err)
+            application.updated_at = datetime.now(timezone.utc)
+            
+            session.add(application)
+            try:
+                session.commit()
+                logger.info(f"Uložen stav FAILED (Quality Gate) pro žádost {application_id}.")
+            except Exception as db_err:
+                logger.error(f"Kritická chyba: Nepodařilo se uložit stav selhání pro žádost {application_id}: {db_err}")
+
         except Exception as e:
-            # Jakékoliv selhání nastaví stav na FAILED a uloží chybu
+            # Jakékoliv obecné selhání nastaví stav na FAILED a uloží plný traceback
             logger.error(f"Chyba při zpracování žádosti {application_id}: {e}")
             
-            # Extrakce celého tracebaku pro snadnější ladění vývojářem
             error_msg = f"{str(e)}\n\n{traceback.format_exc()}"
             
-            # Zajištění čistého stavu session (rollback), abychom předešli pádům při chybě transakce
+            # Zajištění čistého stavu session (rollback)
             session.rollback()
             
             application.status = ApplicationStatus.FAILED

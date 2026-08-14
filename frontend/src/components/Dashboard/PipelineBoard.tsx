@@ -1,4 +1,3 @@
-import React from "react"
 import { Job, JobStatus, JobCard } from "./JobCard"
 import { ScrollArea } from "../ui/scroll-area"
 import { motion, AnimatePresence } from "framer-motion"
