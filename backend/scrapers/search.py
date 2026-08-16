@@ -60,8 +60,8 @@ class JobSearchScraper:
         """Vyhledá nabídky na jobs.cz."""
         if count <= 0:
             return []
-        encoded_query = urllib.parse.quote_plus(query)
-        url = f"https://www.jobs.cz/prace/?q={encoded_query}" if query else "https://www.jobs.cz/prace/"
+        encoded_query = urllib.parse.quote_plus(query.strip())
+        url = f"https://www.jobs.cz/prace/?q={encoded_query}" if query.strip() else "https://www.jobs.cz/prace/"
 
         try:
             response = await self.client.get(url)
@@ -71,14 +71,29 @@ class JobSearchScraper:
             tree = HTMLParser(response.text)
             links = []
 
-            for a in tree.css("a"):
-                href = a.attributes.get("href", "")
-                if "jobs.cz/rpd/" in href or "jobs.cz/r/" in href:
-                    clean_url = href.split("?")[0]
-                    if clean_url not in links:
-                        links.append(clean_url)
-                        if len(links) >= count:
+            # Prioritně vybíráme odkazy z article tagů (karet inzerátů)
+            articles = tree.css("article")
+            for article in articles:
+                for a in article.css("a"):
+                    href = a.attributes.get("href", "")
+                    if "jobs.cz/rpd/" in href or "/rpd/" in href or "jobs.cz/r/" in href:
+                        clean_url = urllib.parse.urljoin("https://www.jobs.cz", href.split("?")[0])
+                        if clean_url not in links:
+                            links.append(clean_url)
                             break
+                if len(links) >= count:
+                    break
+
+            # Fallback pokud v articlech nebylo dostatek odkazů
+            if len(links) < count:
+                for a in tree.css("a"):
+                    href = a.attributes.get("href", "")
+                    if "jobs.cz/rpd/" in href or "jobs.cz/r/" in href:
+                        clean_url = href.split("?")[0]
+                        if clean_url not in links:
+                            links.append(clean_url)
+                            if len(links) >= count:
+                                break
 
             return links
         except Exception as e:
@@ -89,8 +104,8 @@ class JobSearchScraper:
         """Vyhledá nabídky na prace.cz."""
         if count <= 0:
             return []
-        encoded_query = urllib.parse.quote_plus(query)
-        url = f"https://www.prace.cz/nabidky/?q={encoded_query}" if query else "https://www.prace.cz/nabidky/"
+        encoded_query = urllib.parse.quote_plus(query.strip())
+        url = f"https://www.prace.cz/nabidky/?q={encoded_query}" if query.strip() else "https://www.prace.cz/nabidky/"
 
         try:
             response = await self.client.get(url)
@@ -100,7 +115,8 @@ class JobSearchScraper:
             tree = HTMLParser(response.text)
             links = []
 
-            for a in tree.css("a"):
+            # Prioritně hledáme odkazy v nadpisech pracovních karet
+            for a in tree.css("h2 a, h3 a, [class*='JobCardTitle'] a, [class*='job-title'] a"):
                 href = a.attributes.get("href", "")
                 if "/nabidka/" in href or "/rpd/" in href:
                     full_url = urllib.parse.urljoin("https://www.prace.cz", href.split("?")[0])
@@ -109,17 +125,28 @@ class JobSearchScraper:
                         if len(links) >= count:
                             break
 
+            # Fallback pro ostatní odkazy na inzeráty
+            if len(links) < count:
+                for a in tree.css("a"):
+                    href = a.attributes.get("href", "")
+                    if "/nabidka/" in href or "/rpd/" in href:
+                        full_url = urllib.parse.urljoin("https://www.prace.cz", href.split("?")[0])
+                        if full_url not in links and "prace.cz" in full_url:
+                            links.append(full_url)
+                            if len(links) >= count:
+                                break
+
             return links
         except Exception as e:
             logger.warning(f"Chyba při vyhledávání na Prace.cz: {e}")
             return []
 
     async def _search_startupjobs_cz(self, query: str, count: int) -> List[str]:
-        """Vyhledá nabídky na startupjobs.cz přes oficiální core API."""
+        """Vyhledá nabídky na startupjobs.cz přes oficiální core API s fulltext parametrem."""
         if count <= 0:
             return []
-        encoded_query = urllib.parse.quote_plus(query)
-        url = f"https://core.startupjobs.cz/api/search/offers?query={encoded_query}"
+        encoded_query = urllib.parse.quote_plus(query.strip())
+        url = f"https://core.startupjobs.cz/api/search/offers?fulltext[]={encoded_query}" if query.strip() else "https://core.startupjobs.cz/api/search/offers"
 
         try:
             response = await self.client.get(url)
@@ -153,8 +180,8 @@ class JobSearchScraper:
         """Vyhledá nabídky na profesia.cz."""
         if count <= 0:
             return []
-        encoded_query = urllib.parse.quote_plus(query)
-        url = f"https://www.profesia.cz/prace/?search_keywords={encoded_query}" if query else "https://www.profesia.cz/prace/"
+        encoded_query = urllib.parse.quote_plus(query.strip())
+        url = f"https://www.profesia.cz/prace/?search_anywhere={encoded_query}" if query.strip() else "https://www.profesia.cz/prace/"
 
         try:
             response = await self.client.get(url)
@@ -182,8 +209,8 @@ class JobSearchScraper:
         """Vyhledá nabídky na volnamista.cz."""
         if count <= 0:
             return []
-        encoded_query = urllib.parse.quote_plus(query)
-        url = f"https://www.volnamista.cz/hledam-praci?q={encoded_query}" if query else "https://www.volnamista.cz/hledam-praci"
+        encoded_query = urllib.parse.quote_plus(query.strip())
+        url = f"https://www.volnamista.cz/prace/{encoded_query}" if query.strip() else "https://www.volnamista.cz/hledam-praci"
 
         try:
             response = await self.client.get(url)

@@ -65,49 +65,94 @@ class CzechJobScraper(AbstractCSSScraper):
         """
         Extrahuje detaily pracovní nabídky z dané URL adresy.
         """
+        import json
         try:
             response = await self.client.get(url)
             tree = HTMLParser(response.text)
             
-            # 1. Extrakce titulku inzerátu
             title = ""
-            title_selectors = [
-                self.TITLE_SELECTOR,
-                '[data-qa="job-ad-title"]',
-                'h1.job-title',
-                'h1',
-                'title'
-            ]
-            for selector in title_selectors:
-                node = tree.css_first(selector)
-                if node:
-                    extracted_title = node.text(strip=True)
-                    if extracted_title:
-                        title = extracted_title
-                        break
-                        
+            company = ""
+            description = ""
+
+            # 0. Pokus o extrakci z JSON-LD strukturovaných dat (JobPosting)
+            for s in tree.css("script"):
+                if s.attributes.get("type") == "application/ld+json":
+                    try:
+                        d = json.loads(s.text())
+                        if isinstance(d, dict) and d.get("@type") == "JobPosting":
+                            if not title and d.get("title"):
+                                title = str(d.get("title")).strip()
+                            if not company:
+                                org = d.get("hiringOrganization")
+                                if isinstance(org, dict) and org.get("name"):
+                                    company = str(org.get("name")).strip()
+                                elif isinstance(org, str):
+                                    company = org.strip()
+                            if not description and d.get("description"):
+                                ld_desc = str(d.get("description")).strip()
+                                if len(ld_desc) >= 150:
+                                    # Vyčistíme HTML tagy z popisu v JSON-LD
+                                    desc_tree = HTMLParser(ld_desc)
+                                    description = DOMCleaner.extract_clean_text(desc_tree)
+                    except Exception:
+                        pass
+
+            # 1. Extrakce titulku inzerátu pokud není z JSON-LD
+            if not title:
+                title_selectors = [
+                    self.TITLE_SELECTOR,
+                    '[data-qa="job-ad-title"]',
+                    'h1.job-title',
+                    'h1',
+                    'title'
+                ]
+                for selector in title_selectors:
+                    node = tree.css_first(selector)
+                    if node:
+                        extracted_title = node.text(strip=True)
+                        if extracted_title:
+                            title = extracted_title
+                            break
+
+            # 2. Extrakce názvu společnosti pokud není z JSON-LD
+            if not company:
+                company_selectors = [
+                    self.COMPANY_SELECTOR,
+                    '[data-qa="job-ad-company"]',
+                    '.typography-company-name',
+                    '.company-title',
+                    '.employer',
+                    '.detail__company',
+                    'div.company'
+                ]
+                for selector in company_selectors:
+                    node = tree.css_first(selector)
+                    if node:
+                        extracted_company = node.text(strip=True)
+                        if extracted_company:
+                            company = extracted_company
+                            break
+
+            # Fallback pro firmu a titulek z <title> tagu nebo meta og:title (např. Jobs.cz "Pozice – Firma")
+            if not company or company == "Neznámá společnost":
+                title_node = tree.css_first("title") or tree.css_first('meta[property="og:title"]')
+                if title_node:
+                    full_title = title_node.text().strip() if title_node.tag == "title" else title_node.attributes.get("content", "").strip()
+                    if " – " in full_title:
+                        parts = full_title.split(" – ")
+                        if len(parts) >= 2:
+                            if not title or title == "Neznámá pozice":
+                                title = parts[0].strip()
+                            company = parts[-1].split("|")[0].strip()
+                    elif " - " in full_title:
+                        parts = full_title.split(" - ")
+                        if len(parts) >= 2:
+                            if not title or title == "Neznámá pozice":
+                                title = parts[0].strip()
+                            company = parts[-1].split("|")[0].strip()
+
             if not title:
                 title = "Neznámá pozice"
-
-            # 2. Extrakce názvu společnosti
-            company = ""
-            company_selectors = [
-                self.COMPANY_SELECTOR,
-                '[data-qa="job-ad-company"]',
-                '.typography-company-name',
-                '.company-title',
-                '.employer',
-                '.detail__company',
-                'div.company'
-            ]
-            for selector in company_selectors:
-                node = tree.css_first(selector)
-                if node:
-                    extracted_company = node.text(strip=True)
-                    if extracted_company:
-                        company = extracted_company
-                        break
-                        
             if not company:
                 company = "Neznámá společnost"
 
@@ -169,8 +214,16 @@ class CzechJobScraper(AbstractCSSScraper):
                                 jina_title = jina_text.split("Title: ")[1].split("\n")[0].strip()
                                 if jina_title and title == "Neznámá pozice":
                                     title = jina_title
-                            if len(jina_text.strip()) >= 150:
-                                description = jina_text
+                            
+                            cleaned_jina = jina_text
+                            if "Markdown Content:" in cleaned_jina:
+                                cleaned_jina = cleaned_jina.split("Markdown Content:", 1)[1].strip()
+                            elif "URL Source:" in cleaned_jina:
+                                lines = [l for l in cleaned_jina.split("\n") if not l.startswith("Title:") and not l.startswith("URL Source:")]
+                                cleaned_jina = "\n".join(lines).strip()
+
+                            if len(cleaned_jina.strip()) >= 150:
+                                description = cleaned_jina
                 except Exception as jina_err:
                     logger.warning(f"Jina AI Reader fallback selhal: {jina_err}")
 
@@ -218,3 +271,29 @@ class StartupJobsScraper(CzechJobScraper):
     TITLE_SELECTOR = "h1"
     COMPANY_SELECTOR = 'a[href*="/startup/"], .company-name, .employer-name, div.company, h2 a'
     DESCRIPTION_SELECTOR = ".description, .job-description, .content"
+
+    async def extract_job_details(self, url: str) -> ScrapedJob:
+        job = await super().extract_job_details(url)
+        # Pokud je firma neznámá, pokusíme se ji vytáhnout z Nuxt dat
+        if job.company_name == "Neznámá společnost":
+            import json
+            try:
+                response = await self.client.get(url)
+                tree = HTMLParser(response.text)
+                script = tree.css_first("#__NUXT_DATA__")
+                if script:
+                    data = json.loads(script.text())
+                    for item in data:
+                        if isinstance(item, dict) and "name" in item and ("legalName" in item or "ico" in item or "website" in item or "logo" in item):
+                            name_val = item.get("name")
+                            if isinstance(name_val, int) and name_val < len(data) and isinstance(data[name_val], str):
+                                candidate = data[name_val].strip()
+                                if candidate and candidate not in ["StartupJobs.cz", "StartupJobs.com"]:
+                                    job.company_name = candidate
+                                    break
+                            elif isinstance(name_val, str) and name_val not in ["StartupJobs.cz", "StartupJobs.com"]:
+                                job.company_name = name_val.strip()
+                                break
+            except Exception:
+                pass
+        return job

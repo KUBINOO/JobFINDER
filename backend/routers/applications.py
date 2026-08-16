@@ -4,7 +4,7 @@ from typing import List, Optional
 from pydantic import BaseModel
 from database import get_session
 from models import Application, JobPosting, ApplicationStatus, User
-from orchestrator import process_job_application
+from orchestrator import process_job_application, generate_application_email, send_application_email
 
 router = APIRouter(prefix="/api/applications", tags=["applications"])
 
@@ -13,6 +13,11 @@ class ApplicationCreate(BaseModel):
 
 class ApplicationStatusUpdate(BaseModel):
     status: ApplicationStatus
+
+class SendEmailRequest(BaseModel):
+    recipient_email: Optional[str] = None
+    subject: Optional[str] = None
+    body: Optional[str] = None
 
 class ExploreRequest(BaseModel):
     count: int
@@ -83,8 +88,32 @@ def get_applications(session: Session = Depends(get_session)):
             "generated_subject": app.generated_subject,
             "generated_body": app.generated_body,
             "error_logs": app.error_logs,
+            "url": job.source_url if job else "",
+            "source_url": job.source_url if job else "",
         })
     return result
+
+@router.get("/{app_id}", response_model=dict)
+def get_application(app_id: int, session: Session = Depends(get_session)):
+    app = session.get(Application, app_id)
+    if not app:
+        raise HTTPException(status_code=404, detail="Application not found")
+    job = app.job_posting
+    return {
+        "id": str(app.id),
+        "title": job.title or "Zatím nenačteno" if job else "Zatím nenačteno",
+        "company": job.company_name or "Zatím nenačteno" if job else "Zatím nenačteno",
+        "description": job.description or "" if job else "",
+        "status": app.status.value.capitalize(),
+        "dateAdded": app.created_at.strftime("%d.%m.%Y"),
+        "match_score": app.match_score,
+        "match_reason": app.match_reason,
+        "generated_subject": app.generated_subject,
+        "generated_body": app.generated_body,
+        "error_logs": app.error_logs,
+        "url": job.source_url if job else "",
+        "source_url": job.source_url if job else "",
+    }
 
 @router.post("/")
 def create_application(app_in: ApplicationCreate, background_tasks: BackgroundTasks, session: Session = Depends(get_session)):
@@ -138,6 +167,37 @@ def delete_application(app_id: int, session: Session = Depends(get_session)):
     session.delete(application)
     session.commit()
     return {"message": "Application deleted"}
+
+@router.post("/{app_id}/generate")
+def generate_email_for_application(app_id: int, background_tasks: BackgroundTasks, session: Session = Depends(get_session)):
+    application = session.get(Application, app_id)
+    if not application:
+        raise HTTPException(status_code=404, detail="Žádost nebyla nalezena")
+
+    application.status = ApplicationStatus.GENERATING
+    application.error_logs = None
+    session.add(application)
+    session.commit()
+    session.refresh(application)
+
+    background_tasks.add_task(generate_application_email, app_id)
+    return {"message": "Generování e-mailu pomocí AI bylo spuštěno.", "status": "Generating"}
+
+@router.post("/{app_id}/send")
+async def send_email_for_application(app_id: int, send_req: Optional[SendEmailRequest] = None, session: Session = Depends(get_session)):
+    application = session.get(Application, app_id)
+    if not application:
+        raise HTTPException(status_code=404, detail="Žádost nebyla nalezena")
+
+    recipient_email = send_req.recipient_email if send_req else None
+    subject = send_req.subject if send_req else None
+    body = send_req.body if send_req else None
+
+    try:
+        await send_application_email(app_id, recipient_email, subject, body)
+        return {"message": "E-mail byl úspěšně odeslán přes SMTP.", "status": "Sent"}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
 
 @router.delete("/action/wipe")
 def wipe_applications(session: Session = Depends(get_session)):

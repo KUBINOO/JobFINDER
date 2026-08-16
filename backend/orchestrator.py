@@ -1,5 +1,6 @@
 import logging
 import traceback
+from typing import Optional
 from datetime import datetime, timezone
 
 from sqlmodel import Session
@@ -114,56 +115,71 @@ async def _run_llm_generation(session: Session, application: Application) -> Non
     session.add(application)
     session.commit()
 
-async def _run_sending(session: Session, application: Application) -> None:
+async def _run_sending(
+    session: Session, 
+    application: Application, 
+    recipient_email: Optional[str] = None, 
+    subject: Optional[str] = None, 
+    body: Optional[str] = None
+) -> None:
     """Krok 4: Odeslání vygenerovaného e-mailu přes SMTP."""
     user = application.user
     job = application.job_posting
+    user_prefs = session.get(UserPreferences, 1)
     
-    if not user.smtp_username or not user.smtp_password:
-        logger.warning("Uživatel nemá nakonfigurované SMTP údaje. Přeskakuji odeslání e-mailu.")
-        return
+    smtp_email = (user_prefs and user_prefs.smtp_email) or user.email or user.smtp_username
+    smtp_password = (user_prefs and user_prefs.smtp_password) or user.smtp_password
+    smtp_port = (user_prefs and user_prefs.smtp_port) or 587
+    cv_pdf_path = (user_prefs and user_prefs.cv_file_path)
     
+    if not smtp_email or not smtp_password:
+        logger.warning("Uživatel nemá nakonfigurované SMTP údaje v nastavení.")
+        raise ValueError("V nastavení chybí SMTP přihlašovací údaje (e-mail a heslo aplikace).")
+    
+    host = "smtp.gmail.com"
+    if "@seznam.cz" in smtp_email:
+        host = "smtp.seznam.cz"
+    elif "@outlook.com" in smtp_email or "@hotmail.com" in smtp_email:
+        host = "smtp.office365.com"
+        
     email_sender = AsyncEmailSender(
-        host="smtp.gmail.com", 
-        port=587,
-        username=user.smtp_username,
-        password=user.smtp_password,
-        sender_email=user.email
+        host=host, 
+        port=smtp_port,
+        username=smtp_email,
+        password=smtp_password,
+        sender_email=smtp_email
     )
     
-    cv_pdf_path = getattr(user, "cv_pdf_path", None)
-    
-    # Záložní e-mail pro testování, pokud HR e-mail chybí
-    recipient_email = getattr(job, "hr_email", user.email) 
+    final_recipient = recipient_email or getattr(job, "hr_email", None) or smtp_email
+    final_subject = subject or application.generated_subject or f"Zájem o pozici: {job.title or 'Pracovní pozice'}"
+    final_body = body or application.generated_body or ""
     
     await email_sender.send_application(
-        recipient_email=recipient_email,
-        subject=application.generated_subject or "Žádost o zaměstnání",
-        body=application.generated_body or "",
+        recipient_email=final_recipient,
+        subject=final_subject,
+        body=final_body,
         cv_pdf_path=cv_pdf_path
     )
 
 async def process_job_application(application_id: int) -> None:
     """
-    Hlavní Orchestrator běžící na pozadí pomocí FastAPI BackgroundTasks.
-    Explicitně vytváří vlastní izolovanou databázovou session pro bezpečné řízení stavů.
+    Spouští kompletní automatizovanou pipeline pro nově přidanou nebo prozkoumanou pozici:
+    1. Fáze Scraping: Inzerát se stáhne, zvaliduje (Quality Gate) a uloží do DB.
+    2. Fáze AI Analýza: Pokud má uživatel nastavené LLM preference, automaticky se vygeneruje
+       motivační e-mail a vypočítá AI Match Score (stav GENERATED / Připraveno).
     """
     import asyncio
     import random
     
-    # Rozprostření zátěže (1-15 sekund) pro prevenci Rate Limitů u Jina AI a LLM API
-    delay = random.uniform(1, 15)
-    logger.info(f"Spouštím zpracování na pozadí pro žádost {application_id} se zpožděním {delay:.1f}s")
+    delay = random.uniform(0.5, 2.0)
     await asyncio.sleep(delay)
     
-    # Nezávislá izolovaná DB Session pomocí context manageru
     with Session(engine) as session:
         application = session.get(Application, application_id)
         if not application:
             logger.error(f"Žádost {application_id} nebyla nalezena v databázi.")
             return
 
-        # Hranice chyb (Error Boundary) - Celá pipeline je zabalena v try/except bloku
         try:
             # Fáze 1: Scraping
             application.status = ApplicationStatus.SCRAPING
@@ -173,62 +189,122 @@ async def process_job_application(application_id: int) -> None:
             
             await _run_scraping(session, application)
             
-            # Fáze 2 a 3: Generating a Assembly
+            # Fáze 2: Automatické generování AI motivačního dopisu a skóre shody
+            user_prefs = session.get(UserPreferences, 1)
+            has_llm_config = bool(user_prefs and (user_prefs.llm_api_key or user_prefs.llm_provider == "Ollama"))
+
+            if has_llm_config:
+                application.status = ApplicationStatus.GENERATING
+                application.updated_at = datetime.now(timezone.utc)
+                session.add(application)
+                session.commit()
+
+                await _run_llm_generation(session, application)
+
+                application.status = ApplicationStatus.GENERATED
+                application.updated_at = datetime.now(timezone.utc)
+                application.error_logs = None
+                session.add(application)
+                session.commit()
+                logger.info(f"Úspěšně zpracována žádost {application_id} (Scraping + LLM generování). Stav: GENERATED.")
+            else:
+                application.status = ApplicationStatus.PENDING
+                application.updated_at = datetime.now(timezone.utc)
+                application.error_logs = None
+                session.add(application)
+                session.commit()
+                logger.info(f"Úspěšně stažen inzerát pro žádost {application_id}. Připraveno k manuálnímu vygenerování (LLM není nakonfigurováno).")
+            
+        except JobContentValidationError as val_err:
+            logger.warning(f"Quality gate selhala pro žádost {application_id}: {val_err}")
+            session.rollback()
+            application.status = ApplicationStatus.FAILED
+            application.error_logs = str(val_err)
+            application.updated_at = datetime.now(timezone.utc)
+            session.add(application)
+            session.commit()
+        except Exception as e:
+            logger.error(f"Chyba při zpracování žádosti {application_id}: {e}")
+            error_msg = f"{str(e)}\n\n{traceback.format_exc()}"
+            session.rollback()
+            application.status = ApplicationStatus.FAILED
+            application.error_logs = error_msg
+            application.updated_at = datetime.now(timezone.utc)
+            session.add(application)
+            session.commit()
+
+async def generate_application_email(application_id: int) -> None:
+    """
+    Manuálně spuštěné vygenerování motivačního e-mailu a AI shody (Match score).
+    """
+    with Session(engine) as session:
+        application = session.get(Application, application_id)
+        if not application:
+            logger.error(f"Žádost {application_id} nebyla nalezena.")
+            return
+
+        try:
             application.status = ApplicationStatus.GENERATING
             application.updated_at = datetime.now(timezone.utc)
             session.add(application)
             session.commit()
-            
-            await _run_llm_generation(session, application)
-            
-            # Fáze 4: Sending
-            application.status = ApplicationStatus.SENDING
-            application.updated_at = datetime.now(timezone.utc)
-            session.add(application)
-            session.commit()
-            
-            await _run_sending(session, application)
-            
-            # Fáze 5: Completed
-            application.status = ApplicationStatus.COMPLETED
-            application.updated_at = datetime.now(timezone.utc)
-            session.add(application)
-            session.commit()
-            
-            logger.info(f"Úspěšně dokončeno zpracování žádosti {application_id}.")
-            
-        except JobContentValidationError as val_err:
-            # Specifické ošetření Quality Gate selhání popisu inzerátu
-            logger.warning(f"Quality gate selhala pro žádost {application_id}: {val_err}")
-            session.rollback()
-            
-            application.status = ApplicationStatus.FAILED
-            application.error_logs = str(val_err)
-            application.updated_at = datetime.now(timezone.utc)
-            
-            session.add(application)
-            try:
-                session.commit()
-                logger.info(f"Uložen stav FAILED (Quality Gate) pro žádost {application_id}.")
-            except Exception as db_err:
-                logger.error(f"Kritická chyba: Nepodařilo se uložit stav selhání pro žádost {application_id}: {db_err}")
 
-        except Exception as e:
-            # Jakékoliv obecné selhání nastaví stav na FAILED a uloží plný traceback
-            logger.error(f"Chyba při zpracování žádosti {application_id}: {e}")
-            
-            error_msg = f"{str(e)}\n\n{traceback.format_exc()}"
-            
-            # Zajištění čistého stavu session (rollback)
-            session.rollback()
-            
-            application.status = ApplicationStatus.FAILED
-            application.error_logs = error_msg
+            await _run_llm_generation(session, application)
+
+            application.status = ApplicationStatus.GENERATED
             application.updated_at = datetime.now(timezone.utc)
-            
+            application.error_logs = None
             session.add(application)
-            try:
-                session.commit()
-                logger.info(f"Uložen chybový stav FAILED pro žádost {application_id}.")
-            except Exception as db_err:
-                logger.error(f"Kritická chyba: Nepodařilo se uložit chybový stav pro žádost {application_id}: {db_err}")
+            session.commit()
+            logger.info(f"Úspěšně vygenerován motivační e-mail pro žádost {application_id}.")
+        except Exception as e:
+            logger.error(f"Chyba při generování e-mailu pro žádost {application_id}: {e}")
+            error_msg = f"{str(e)}\n\n{traceback.format_exc()}"
+            session.rollback()
+            application.status = ApplicationStatus.FAILED
+            application.error_logs = f"Chyba při generování e-mailu: {error_msg}"
+            application.updated_at = datetime.now(timezone.utc)
+            session.add(application)
+            session.commit()
+
+async def send_application_email(
+    application_id: int, 
+    recipient_email: Optional[str] = None, 
+    subject: Optional[str] = None, 
+    body: Optional[str] = None
+) -> None:
+    """
+    Manuální odeslání e-mailu přes SMTP.
+    """
+    with Session(engine) as session:
+        application = session.get(Application, application_id)
+        if not application:
+            raise ValueError(f"Žádost {application_id} nebyla nalezena.")
+
+        try:
+            application.status = ApplicationStatus.SENDING
+            if subject:
+                application.generated_subject = subject
+            if body:
+                application.generated_body = body
+            application.updated_at = datetime.now(timezone.utc)
+            session.add(application)
+            session.commit()
+
+            await _run_sending(session, application, recipient_email, subject, body)
+
+            application.status = ApplicationStatus.SENT
+            application.updated_at = datetime.now(timezone.utc)
+            application.error_logs = None
+            session.add(application)
+            session.commit()
+            logger.info(f"Úspěšně odeslán e-mail pro žádost {application_id}.")
+        except Exception as e:
+            logger.error(f"Chyba při odesílání e-mailu pro žádost {application_id}: {e}")
+            session.rollback()
+            application.status = ApplicationStatus.FAILED
+            application.error_logs = f"Chyba při odesílání e-mailu přes SMTP: {str(e)}"
+            application.updated_at = datetime.now(timezone.utc)
+            session.add(application)
+            session.commit()
+            raise
