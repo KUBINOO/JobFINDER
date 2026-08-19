@@ -1,7 +1,9 @@
+import os
 import logging
 import traceback
 from typing import Optional
 from datetime import datetime, timezone
+
 
 from sqlmodel import Session
 from database import engine
@@ -53,18 +55,52 @@ async def _run_llm_generation(session: Session, application: Application) -> Non
     # Získání nastavení s cestou k PDF životopisu
     user_prefs = session.get(UserPreferences, 1)
     
-    cv_text = user.cv_summary or "Životopis není k dispozici."
-    if user_prefs and user_prefs.cv_file_path:
+    cv_text = ""
+    if user_prefs and user_prefs.cv_file_path and os.path.exists(user_prefs.cv_file_path):
         try:
             cv_text = extract_text_from_pdf(user_prefs.cv_file_path)
             logger.info(f"Úspěšně extrahován text z CV PDF: {user_prefs.cv_file_path}")
         except Exception as e:
-            logger.error(f"Nepodařilo se extrahovat text z PDF: {e}")
-            raise
-    
-    import os
+            logger.error(f"Nepodařilo se extrahovat text z PDF ({user_prefs.cv_file_path}): {e}")
+
+    # Pokud text není k dispozici nebo soubor nebyl nalezen, zkusíme najít existující PDF ve složce uploads/
+    if not cv_text or not cv_text.strip():
+        uploads_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), "uploads")
+        if os.path.exists(uploads_dir):
+            pdf_files = [os.path.join(uploads_dir, f) for f in os.listdir(uploads_dir) if f.lower().endswith(".pdf")]
+            if pdf_files:
+                # Seřadíme podle data úpravy a vezmeme nejnovější
+                pdf_files.sort(key=lambda x: os.path.getmtime(x), reverse=True)
+                latest_pdf = pdf_files[0]
+                try:
+                    cv_text = extract_text_from_pdf(latest_pdf)
+                    logger.info(f"Automaticky obnovena cesta k nalezenému CV PDF: {latest_pdf}")
+                    if user_prefs:
+                        user_prefs.cv_file_path = latest_pdf
+                        session.add(user_prefs)
+                        session.commit()
+                except Exception as e:
+                    logger.error(f"Nepodařilo se extrahovat text z nalezeného PDF ({latest_pdf}): {e}")
+
+    # Fallback na textový profil z preferencí nebo User modelu, pokud PDF není vůbec
+    if not cv_text or not cv_text.strip():
+        profile_parts = []
+        if user_prefs:
+            if user_prefs.full_name: profile_parts.append(f"Jméno: {user_prefs.full_name}")
+            if user_prefs.education: profile_parts.append(f"Vzdělání: {user_prefs.education}")
+            if user_prefs.industry: profile_parts.append(f"Obor / Zaměření: {user_prefs.industry}")
+            if user_prefs.linkedin_url: profile_parts.append(f"LinkedIn: {user_prefs.linkedin_url}")
+        if user and user.cv_summary:
+            profile_parts.append(f"Shrnutí zkušeností: {user.cv_summary}")
+            
+        if profile_parts:
+            cv_text = "\n".join(profile_parts)
+        else:
+            cv_text = "Životopis není k dispozici."
+
     llm_model = None
     if user_prefs:
+
         llm_model = user_prefs.llm_model
         
         # Mapování modelů na aktuální verze
@@ -73,23 +109,28 @@ async def _run_llm_generation(session: Session, application: Application) -> Non
         elif llm_model in ["gemini-1.5-pro", "gemini-pro-latest"]:
             llm_model = "gemini-1.5-pro"
 
+        api_key = user_prefs.llm_api_key
         if user_prefs.llm_provider == "Google Gemini":
             if not llm_model.startswith("gemini/"):
                 llm_model = f"gemini/{llm_model}"
-            if user_prefs.llm_api_key:
-                os.environ["GEMINI_API_KEY"] = user_prefs.llm_api_key
+            if api_key:
+                os.environ["GEMINI_API_KEY"] = api_key
+                os.environ["GOOGLE_API_KEY"] = api_key
         elif user_prefs.llm_provider == "OpenAI":
-            if user_prefs.llm_api_key:
-                os.environ["OPENAI_API_KEY"] = user_prefs.llm_api_key
+            if api_key:
+                os.environ["OPENAI_API_KEY"] = api_key
         elif user_prefs.llm_provider == "Anthropic":
-            if user_prefs.llm_api_key:
-                os.environ["ANTHROPIC_API_KEY"] = user_prefs.llm_api_key
+            if api_key:
+                os.environ["ANTHROPIC_API_KEY"] = api_key
         elif user_prefs.llm_provider == "Ollama":
             if not llm_model.startswith("ollama/"):
                 llm_model = f"ollama/{llm_model}"
+    else:
+        api_key = None
                 
-    llm_generator = CoverLetterGenerator(model=llm_model)
+    llm_generator = CoverLetterGenerator(model=llm_model, api_key=api_key)
     draft = await llm_generator.generate_email(
+
         user_cv=cv_text,
         job_desc=job.description or "Popis pozice není k dispozici.",
         job_title=job.title or job.company_name or "Neznámá pozice"
@@ -181,7 +222,7 @@ async def process_job_application(application_id: int) -> None:
             return
 
         try:
-            # Fáze 1: Scraping
+            # Fáze 1: Scraping a stažení inzerátu
             application.status = ApplicationStatus.SCRAPING
             application.updated_at = datetime.now(timezone.utc)
             session.add(application)
@@ -189,33 +230,16 @@ async def process_job_application(application_id: int) -> None:
             
             await _run_scraping(session, application)
             
-            # Fáze 2: Automatické generování AI motivačního dopisu a skóre shody
-            user_prefs = session.get(UserPreferences, 1)
-            has_llm_config = bool(user_prefs and (user_prefs.llm_api_key or user_prefs.llm_provider == "Ollama"))
-
-            if has_llm_config:
-                application.status = ApplicationStatus.GENERATING
-                application.updated_at = datetime.now(timezone.utc)
-                session.add(application)
-                session.commit()
-
-                await _run_llm_generation(session, application)
-
-                application.status = ApplicationStatus.GENERATED
-                application.updated_at = datetime.now(timezone.utc)
-                application.error_logs = None
-                session.add(application)
-                session.commit()
-                logger.info(f"Úspěšně zpracována žádost {application_id} (Scraping + LLM generování). Stav: GENERATED.")
-            else:
-                application.status = ApplicationStatus.PENDING
-                application.updated_at = datetime.now(timezone.utc)
-                application.error_logs = None
-                session.add(application)
-                session.commit()
-                logger.info(f"Úspěšně stažen inzerát pro žádost {application_id}. Připraveno k manuálnímu vygenerování (LLM není nakonfigurováno).")
+            # Po úspěšném scrapingu nastavíme stav na PENDING (připraveno pro uživatele)
+            application.status = ApplicationStatus.PENDING
+            application.updated_at = datetime.now(timezone.utc)
+            application.error_logs = None
+            session.add(application)
+            session.commit()
+            logger.info(f"Úspěšně stažen inzerát pro žádost {application_id}. Připraveno k manuálnímu spuštění generování uživatelem.")
             
         except JobContentValidationError as val_err:
+
             logger.warning(f"Quality gate selhala pro žádost {application_id}: {val_err}")
             session.rollback()
             application.status = ApplicationStatus.FAILED

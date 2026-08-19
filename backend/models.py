@@ -67,14 +67,15 @@ class UserPreferences(SQLModel, table=True):
     industry: Optional[str] = Field(default=None)
     cv_file_path: Optional[str] = Field(default=None)
     linkedin_url: Optional[str] = Field(default=None)
-    llm_provider: str
-    llm_model: str
+    llm_provider: Optional[str] = Field(default="Google Gemini")
+    llm_model: Optional[str] = Field(default="gemini-1.5-flash")
     llm_api_key: Optional[str] = Field(default=None)
     ollama_host: Optional[str] = Field(default=None)
     tone_of_voice: Optional[str] = Field(default="formal")
     custom_prompt: Optional[str] = Field(default=None)
-    smtp_email: str
-    smtp_password: str
-    smtp_port: int
+    smtp_email: Optional[str] = Field(default="")
+    smtp_password: Optional[str] = Field(default="")
+    smtp_port: Optional[int] = Field(default=587)
     scraper_delay_min: Optional[float] = Field(default=2.0)
     scraper_delay_max: Optional[float] = Field(default=5.0)
+

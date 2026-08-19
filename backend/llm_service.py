@@ -2,25 +2,35 @@ import os
 import logging
 import asyncio
 from typing import Optional
-from tenacity import retry, stop_after_attempt, wait_exponential, retry_if_exception_type
+from tenacity import retry, stop_after_attempt, wait_exponential, retry_if_exception
 from litellm import acompletion
 from pydantic import ValidationError
 
 from schemas import JobAnalysisResult
 
+import litellm
+from litellm.exceptions import AuthenticationError, BadRequestError
+
 logger = logging.getLogger(__name__)
 
 # Globální semafor pro řízení souběžných volání LLM (ochrana před 429 Rate Limit)
-_llm_semaphore = asyncio.Semaphore(1)
+_llm_semaphore = asyncio.Semaphore(2)
 
 class LLMGenerationError(Exception):
     """Vlastní výjimka pro chyby při generování přes LLM."""
     pass
 
+def _should_retry(exception: Exception) -> bool:
+    # Do not retry on permanent errors like invalid API key or bad request parameters
+    if isinstance(exception, (AuthenticationError, BadRequestError)):
+        return False
+    return True
+
 class CoverLetterGenerator:
-    def __init__(self, model: Optional[str] = None):
+    def __init__(self, model: Optional[str] = None, api_key: Optional[str] = None):
         # Inicializace modelu z proměnných prostředí, výchozí je gpt-4o
         self.model = model or os.getenv("LLM_MODEL", "gpt-4o")
+        self.api_key = api_key
         
         # Systémový prompt v češtině pro striktní dodržování formátu a jazyka
         self.system_prompt = (
@@ -42,9 +52,9 @@ class CoverLetterGenerator:
         )
 
     @retry(
-        stop=stop_after_attempt(5),
-        wait=wait_exponential(multiplier=2, min=10, max=45),
-        retry=retry_if_exception_type(Exception),
+        stop=stop_after_attempt(3),
+        wait=wait_exponential(multiplier=1.5, min=2, max=10),
+        retry=retry_if_exception(_should_retry),
         reraise=True
     )
     async def _call_llm(self, user_cv: str, job_desc: str, job_title: str) -> JobAnalysisResult:
@@ -62,15 +72,20 @@ class CoverLetterGenerator:
 
         async with _llm_semaphore:
             # Krátká prodleva pro zabránění burst 429 chybám
-            await asyncio.sleep(2)
+            await asyncio.sleep(1)
             try:
                 logger.info(f"Volání LLM ({self.model}) pro vygenerování e-mailu pro pozici {job_title}")
-                response = await acompletion(
-                    model=self.model,
-                    messages=messages,
-                    response_format=JobAnalysisResult,
-                    temperature=0.3 # Nastavení teploty na 0.3 pro vysokou faktickou konzistenci
-                )
+                kwargs = {
+                    "model": self.model,
+                    "messages": messages,
+                    "response_format": JobAnalysisResult,
+                    "temperature": 0.3
+                }
+                if self.api_key:
+                    kwargs["api_key"] = self.api_key
+                    
+                response = await acompletion(**kwargs)
+
                 
                 # litellm s response_format=PydanticModel zajistí JSON výstup.
                 # Zpracujeme vrácený text pro zajištění přesné shody s JobAnalysisResult.

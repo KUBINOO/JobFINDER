@@ -24,15 +24,17 @@ class PreferencesUpdate(BaseModel):
     age: Optional[int] = None
     education: Optional[str] = None
     industry: Optional[str] = None
+    cv_file_path: Optional[str] = None
     linkedin_url: Optional[str] = None
-    llm_provider: str
-    llm_model: str
+    llm_provider: Optional[str] = "Google Gemini"
+    llm_model: Optional[str] = "gemini-1.5-flash"
     llm_api_key: Optional[str] = None
     ollama_host: Optional[str] = None
     tone_of_voice: Optional[str] = "formal"
     custom_prompt: Optional[str] = None
-    smtp_email: str
-    smtp_password: str
-    smtp_port: int
+    smtp_email: Optional[str] = ""
+    smtp_password: Optional[str] = ""
+    smtp_port: Optional[int] = 587
     scraper_delay_min: Optional[float] = 2.0
     scraper_delay_max: Optional[float] = 5.0
+

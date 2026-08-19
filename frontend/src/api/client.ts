@@ -4,10 +4,7 @@ import axios from 'axios';
 export const apiClient = axios.create({
   // Fallback to relative /api path which will be proxied by Vite in development
   baseURL: import.meta.env.VITE_API_URL || '/api',
-  headers: {
-    'Content-Type': 'application/json',
-  },
-  timeout: 10000, // 10 seconds timeout
+  timeout: 15000, // 15 seconds timeout
 });
 
 // Request Interceptor

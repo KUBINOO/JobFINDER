@@ -153,10 +153,10 @@ export function DetailPanel({ job, onStatusChange }: DetailPanelProps) {
   }
 
   return (
-    <>
-      <ScrollArea className="flex-1 h-full">
-        <div className="p-10 max-w-4xl mx-auto pb-44">
-          {/* HLAVIČKA POZICE */}
+    <ScrollArea className="flex-1 h-full">
+      <div className="p-10 max-w-4xl mx-auto pb-12">
+        {/* HLAVIČKA POZICE */}
+
           <div className="mb-10">
             <div className="flex justify-between items-start">
               <div>
@@ -473,51 +473,5 @@ export function DetailPanel({ job, onStatusChange }: DetailPanelProps) {
           </div>
         </div>
       </ScrollArea>
-
-      {/* SPODNÍ PLOVOUCÍ TLAČÍTKO */}
-      <div className="absolute bottom-0 left-0 right-0 p-6 bg-gradient-to-t from-zinc-50 via-zinc-50/80 to-transparent dark:from-black dark:via-black/80 flex justify-center pb-8 pt-20 pointer-events-none">
-        {!hasGeneratedEmail ? (
-          <Button 
-            size="lg" 
-            disabled={isGenerating}
-            className="pointer-events-auto h-14 px-10 text-base font-semibold rounded-full shadow-2xl hover:shadow-primary/25 hover:scale-[1.02] transition-all bg-primary text-primary-foreground gap-2"
-            onClick={() => generateMutation.mutate(job.id)}
-          >
-            {isGenerating ? (
-              <Loader2 className="w-5 h-5 animate-spin" />
-            ) : (
-              <Sparkles className="w-5 h-5" />
-            )}
-            {isGenerating ? "Generuji e-mail..." : "Vygenerovat motivační e-mail"}
-          </Button>
-        ) : (
-          <Button 
-            size="lg" 
-            disabled={isSending || isGenerating}
-            className={cn(
-              "pointer-events-auto h-14 px-10 text-base font-semibold rounded-full shadow-2xl hover:shadow-primary/25 hover:scale-[1.02] transition-all gap-2",
-              isSent 
-                ? "bg-green-600 hover:bg-green-700 text-white" 
-                : "bg-primary text-primary-foreground"
-            )}
-            onClick={() => sendEmailMutation.mutate({
-              jobId: job.id,
-              recipient: recipientEmail,
-              subject: emailSubject,
-              body: emailBody
-            })}
-          >
-            {isSending ? (
-              <Loader2 className="w-5 h-5 animate-spin" />
-            ) : isSent ? (
-              <CheckCircle2 className="w-5 h-5" />
-            ) : (
-              <Send className="w-5 h-5" />
-            )}
-            {isSending ? "Odesílám..." : isSent ? "Odesláno (Odeslat znovu)" : "Poslat e-mail přes SMTP"}
-          </Button>
-        )}
-      </div>
-    </>
   )
 }

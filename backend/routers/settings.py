@@ -1,18 +1,15 @@
 from fastapi import APIRouter, HTTPException, Depends
 from sqlmodel import Session
-from database import engine
-from models import UserPreferences
+from database import get_session
+from models import UserPreferences, User
 from schemas import PreferencesUpdate
 
 router = APIRouter()
 
-def get_session():
-    with Session(engine) as session:
-        yield session
-
 @router.put("/api/settings", response_model=UserPreferences)
 def update_settings(prefs: PreferencesUpdate, session: Session = Depends(get_session)):
-    print(f"Received PUT /api/settings request. Payload: {prefs.model_dump()}")
+    dump_data = prefs.model_dump(exclude_unset=True)
+    print(f"Received PUT /api/settings request. Payload: {dump_data}")
     
     # Toto je lokální aplikace pro jednoho uživatele (Singleton vzor)
     user_prefs = session.get(UserPreferences, 1)
@@ -20,14 +17,34 @@ def update_settings(prefs: PreferencesUpdate, session: Session = Depends(get_ses
     if user_prefs:
         print("Existing preferences found, updating...")
         # Aktualizujeme existující záznam
-        for key, value in prefs.model_dump().items():
-            setattr(user_prefs, key, value)
+        for key, value in dump_data.items():
+            if value is not None or key not in ("cv_file_path",):
+                setattr(user_prefs, key, value)
     else:
         print("No existing preferences found, creating new record...")
         # Vytvoříme nový záznam pro prvního uživatele
-        user_prefs = UserPreferences(id=1, **prefs.model_dump())
+        user_prefs = UserPreferences(id=1, **dump_data)
         
     session.add(user_prefs)
+    
+    # Synchronizujeme také User(id=1) pro vazby v Application
+    user = session.get(User, 1)
+    full_name = prefs.full_name or ""
+    parts = full_name.strip().split(" ", 1)
+    first_name = parts[0] if parts and parts[0] else "Uživatel"
+    last_name = parts[1] if len(parts) > 1 else ""
+    user_email = prefs.smtp_email if (prefs.smtp_email and "@" in prefs.smtp_email) else "demo@example.com"
+    
+    if not user:
+        user = User(id=1, first_name=first_name, last_name=last_name, email=user_email)
+    else:
+        if prefs.full_name:
+            user.first_name = first_name
+            user.last_name = last_name
+        if prefs.smtp_email and "@" in prefs.smtp_email:
+            user.email = user_email
+    session.add(user)
+    
     try:
         session.commit()
         session.refresh(user_prefs)
@@ -45,6 +62,7 @@ def get_settings(session: Session = Depends(get_session)):
     if not user_prefs:
         raise HTTPException(status_code=404, detail="Nastavení nenalezeno")
     return user_prefs
+
 
 from pydantic import BaseModel
 import aiosmtplib

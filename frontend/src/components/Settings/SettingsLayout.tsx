@@ -2,11 +2,12 @@ import React, { useState } from "react"
 import { motion, AnimatePresence } from "framer-motion"
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query"
 import axios from "axios"
-import { User, Cpu, Mail, Database, Save, Loader2, AlertTriangle } from "lucide-react"
+import { User, Cpu, Mail, Database, Save, Loader2, AlertTriangle, UploadCloud, FileText, CheckCircle2 } from "lucide-react"
 
 import { Input } from "../ui/input"
 import { Button } from "../ui/button"
 import { Textarea } from "../ui/textarea"
+
 
 const API_BASE = "http://localhost:8000/api"
 
@@ -64,6 +65,26 @@ export function SettingsLayout() {
       alert("Chyba při mazání: " + (err.response?.data?.detail || err.message))
     }
   })
+
+  const uploadCvMutation = useMutation({
+    mutationFn: async (file: File) => {
+      const fileData = new FormData()
+      fileData.append("file", file)
+      const res = await axios.post(`${API_BASE}/upload-cv`, fileData, {
+        headers: { "Content-Type": "multipart/form-data" }
+      })
+      return res.data
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["settings"] })
+      alert("Životopis byl úspěšně nahrán a uložen!")
+    },
+    onError: (err: any) => {
+      const detail = err.response?.data?.detail
+      alert("Chyba při nahrávání CV: " + (detail || err.message))
+    }
+  })
+
 
   if (isLoading || !settings) {
     return <div className="flex-1 flex items-center justify-center">Načítání nastavení...</div>
@@ -183,12 +204,43 @@ export function SettingsLayout() {
                       <label className={labelClass}>Škola / Vzdělání</label>
                       <Input name="education" defaultValue={settings.education || ""} placeholder="ČVUT FIT" className="bg-white dark:bg-black" />
                     </div>
-                    <div className="p-6 border border-dashed border-border rounded-xl bg-black/5 dark:bg-white/5 text-center mt-6">
-                      <p className="text-sm text-muted-foreground mb-4">Nahrávání nového CV PDF přesunuto do existující Onboarding komponenty. Zde zatím nelze nahrát nové.</p>
-                      <div className="text-xs font-mono bg-black/10 dark:bg-white/10 p-2 rounded truncate">Aktuální: {settings.cv_file_path || "Není nahráno"}</div>
+                    <div className="p-6 border-2 border-dashed border-primary/20 rounded-2xl bg-black/5 dark:bg-white/5 space-y-4 mt-6">
+                      <div className="flex items-center justify-between">
+                        <div className="flex items-center gap-3">
+                          <div className="w-10 h-10 rounded-xl bg-primary/10 flex items-center justify-center text-primary">
+                            <FileText className="w-5 h-5" />
+                          </div>
+                          <div>
+                            <h4 className="text-sm font-semibold">Životopis (CV PDF)</h4>
+                            <p className="text-xs text-muted-foreground">Aktuální soubor pro generování motivačních dopisů</p>
+                          </div>
+                        </div>
+                        <label className="cursor-pointer">
+                          <input 
+                            type="file" 
+                            accept="application/pdf" 
+                            className="hidden" 
+                            onChange={(e) => {
+                              if (e.target.files && e.target.files.length > 0) {
+                                uploadCvMutation.mutate(e.target.files[0])
+                              }
+                            }}
+                            disabled={uploadCvMutation.isPending}
+                          />
+                          <Button type="button" variant="outline" size="sm" className="gap-2 pointer-events-none" disabled={uploadCvMutation.isPending}>
+                            {uploadCvMutation.isPending ? <Loader2 className="w-4 h-4 animate-spin" /> : <UploadCloud className="w-4 h-4" />}
+                            {uploadCvMutation.isPending ? "Nahrávání..." : "Nahrát nové PDF"}
+                          </Button>
+                        </label>
+                      </div>
+                      <div className="flex items-center gap-2 text-xs font-mono bg-black/10 dark:bg-white/10 p-2.5 rounded-lg truncate">
+                        <CheckCircle2 className="w-4 h-4 text-green-500 shrink-0" />
+                        <span className="truncate">{settings.cv_file_path || "Není nahráno žádné PDF"}</span>
+                      </div>
                     </div>
                   </div>
                 )}
+
 
                 {activeTab === "ai" && (
                   <div className="space-y-6">

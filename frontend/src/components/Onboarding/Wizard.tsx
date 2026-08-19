@@ -7,10 +7,13 @@ import { Card, CardContent } from "../ui/card"
 import { UploadCloud, ChevronRight, ChevronLeft } from "lucide-react"
 import { apiClient } from "../../api/client"
 
+import { useQueryClient } from "@tanstack/react-query"
+
 // Konstanty s kroky wizardu v češtině
 const STEPS = ["Základní údaje", "Dokumenty", "Motor aplikace"]
 
 export function OnboardingWizard({ onComplete }: { onComplete: () => void }) {
+  const queryClient = useQueryClient()
   const [step, setStep] = useState(0)
   const [direction, setDirection] = useState(1)
   const [isSubmitting, setIsSubmitting] = useState(false)
@@ -21,8 +24,8 @@ export function OnboardingWizard({ onComplete }: { onComplete: () => void }) {
     education: "",
     industry: "",
     linkedin_url: "",
-    provider: "OpenAI",
-    model: "gpt-4o",
+    provider: "Google Gemini",
+    model: "gemini-1.5-flash",
     api_key: "",
     ollama_host: "",
     smtp_email: "",
@@ -38,30 +41,40 @@ export function OnboardingWizard({ onComplete }: { onComplete: () => void }) {
       if (cvFile) {
         const fileData = new FormData()
         fileData.append("file", cvFile)
-        await apiClient.post("/upload-cv", fileData)
+        await apiClient.post("/upload-cv", fileData, {
+          headers: {
+            "Content-Type": "multipart/form-data",
+          },
+        })
       }
 
       const payload = {
-        full_name: formData.name || null,
+        full_name: formData.name.trim() || null,
         age: formData.age ? parseInt(formData.age, 10) : null,
-        education: formData.education || null,
-        industry: formData.industry || null,
-        linkedin_url: formData.linkedin_url || null,
+        education: formData.education.trim() || null,
+        industry: formData.industry.trim() || null,
+        linkedin_url: formData.linkedin_url.trim() || null,
         llm_provider: formData.provider,
         llm_model: formData.model,
-        llm_api_key: formData.api_key || null,
-        ollama_host: formData.ollama_host || null,
-        smtp_email: formData.smtp_email,
-        smtp_password: formData.smtp_password,
-        smtp_port: parseInt(formData.smtp_port, 10),
+        llm_api_key: formData.api_key.trim() || null,
+        ollama_host: formData.ollama_host.trim() || null,
+        smtp_email: formData.smtp_email.trim() || "",
+        smtp_password: formData.smtp_password.trim() || "",
+        smtp_port: formData.smtp_port ? parseInt(formData.smtp_port, 10) : 587,
       };
+      
       console.log("Sending payload to /api/settings:", payload);
       const response = await apiClient.put("/settings", payload);
       console.log("Response from /api/settings:", response.data);
-      onComplete()
+
+      queryClient.setQueryData(["settings"], response.data);
+      await queryClient.invalidateQueries({ queryKey: ["settings"] });
+      onComplete();
     } catch (err: any) {
       console.error("Error saving settings:", err.response?.data || err.message || err);
-      alert("Došlo k chybě při ukládání nastavení.")
+      const detail = err.response?.data?.detail;
+      const errorMsg = Array.isArray(detail) ? JSON.stringify(detail) : (detail || err.message || "Neznámá chyba");
+      alert("Došlo k chybě při ukládání nastavení: " + errorMsg);
     } finally {
       setIsSubmitting(false)
     }
@@ -70,27 +83,32 @@ export function OnboardingWizard({ onComplete }: { onComplete: () => void }) {
   const handleDevSkip = async () => {
     setIsSubmitting(true)
     try {
-      await apiClient.put("/settings", {
+      const response = await apiClient.put("/settings", {
+        full_name: "Jakub Slavík",
         age: 30,
         education: "Vysoká škola",
         industry: "IT / Software",
         linkedin_url: "https://linkedin.com/in/devtest",
-        llm_provider: "OpenAI",
-        llm_model: "gpt-4o-mini",
-        llm_api_key: "sk-devtest123",
+        llm_provider: "Google Gemini",
+        llm_model: "gemini-1.5-flash",
+        llm_api_key: null,
         ollama_host: null,
         smtp_email: "dev@test.local",
         smtp_password: "devpassword123",
         smtp_port: 587,
       })
+      queryClient.setQueryData(["settings"], response.data);
+      await queryClient.invalidateQueries({ queryKey: ["settings"] });
       onComplete()
-    } catch (err) {
+    } catch (err: any) {
       console.error(err)
-      alert("Došlo k chybě při ukládání DEV testovacích dat.")
+      const detail = err.response?.data?.detail;
+      alert("Došlo k chybě při ukládání DEV testovacích dat: " + (detail || err.message || ""));
     } finally {
       setIsSubmitting(false)
     }
   }
+
 
   // Přechod na další krok
   const nextStep = () => {
@@ -295,12 +313,11 @@ function Step2Docs({ formData, setFormData, cvFile, setCvFile }: any) {
 }
 
 function Step3API({ formData, setFormData }: any) {
-  // Dynamické modely pro dané poskytovatele
   const models: Record<string, string[]> = {
+    "Google Gemini": ["gemini-1.5-flash", "gemini-1.5-pro", "gemini-2.0-flash", "gemini-flash-latest"],
     "OpenAI": ["gpt-4o", "gpt-4o-mini"],
     "Anthropic": ["claude-3-5-sonnet", "claude-3-opus"],
     "Groq": ["llama-3.1-70b-versatile", "mixtral-8x7b-32768"],
-    "Google Gemini": ["gemini-pro-latest", "gemini-flash-latest", "gemini-3.5-flash", "gemini-2.5-flash"],
     "Ollama (Local)": ["llama3", "mistral"]
   }
   

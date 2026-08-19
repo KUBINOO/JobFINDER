@@ -1,9 +1,11 @@
 import { OnboardingWizard } from "./components/Onboarding/Wizard"
 import { DashboardLayout } from "./components/Dashboard/Layout"
 import { useSettings } from "./hooks/useSettings"
+import { useQueryClient } from "@tanstack/react-query"
 
 function App() {
   const { data: settings, isLoading, isError, isSuccess } = useSettings()
+  const queryClient = useQueryClient()
 
   if (isLoading) {
     return (
@@ -18,7 +20,13 @@ function App() {
 
   // If there's an error (e.g. 404) or no settings found, user needs onboarding
   if (isError || !settings) {
-    return <OnboardingWizard onComplete={() => window.location.reload()} />
+    return (
+      <OnboardingWizard 
+        onComplete={() => {
+          queryClient.invalidateQueries({ queryKey: ["settings"] })
+        }} 
+      />
+    )
   }
 
   // If successful and settings exist, go to dashboard
