@@ -17,7 +17,10 @@ import {
   Loader2, 
   User, 
   AtSign,
-  Check
+  Check,
+  AlertTriangle,
+  Key,
+  Settings
 } from "lucide-react"
 import { cn } from "../../lib/utils"
 import { useMutation, useQueryClient } from "@tanstack/react-query"
@@ -29,6 +32,7 @@ const API_BASE = "http://localhost:8000/api"
 interface DetailPanelProps {
   job: Job | null;
   onStatusChange: (jobId: string, newStatus: JobStatus) => void;
+  onOpenSettings?: (tab?: string) => void;
 }
 
 function getPortalName(url?: string): string {
@@ -46,7 +50,7 @@ function getPortalName(url?: string): string {
   }
 }
 
-export function DetailPanel({ job, onStatusChange }: DetailPanelProps) {
+export function DetailPanel({ job, onStatusChange, onOpenSettings }: DetailPanelProps) {
   const queryClient = useQueryClient()
   const { data: settings } = useSettings()
 
@@ -54,6 +58,16 @@ export function DetailPanel({ job, onStatusChange }: DetailPanelProps) {
   const [emailSubject, setEmailSubject] = useState("")
   const [emailBody, setEmailBody] = useState("")
   const [copied, setCopied] = useState(false)
+
+  const hasCv = Boolean(settings?.cv_file_path)
+  const hasProfile = Boolean(settings?.full_name || settings?.industry || settings?.education)
+  const isOllama = settings?.llm_provider === "Ollama"
+  const rawKey = settings?.llm_api_key?.trim() || ""
+  const isKeyProjectFormat = rawKey.startsWith("gen-lang-client")
+  const hasApiKey = isOllama ? true : Boolean(rawKey && !isKeyProjectFormat)
+  const isMissingCv = !hasCv && !hasProfile
+  const isMissingKey = !hasApiKey
+  const hasValidConfig = !isMissingCv && !isMissingKey
 
   // Synchronizace lokálního stavu editoru při změně vybraného inzerátu nebo vygenerování textu
   useEffect(() => {
@@ -113,7 +127,7 @@ export function DetailPanel({ job, onStatusChange }: DetailPanelProps) {
   const isGenerating = job.status === "Generating" || generateMutation.isPending
   const isSending = job.status === "Sending" || sendEmailMutation.isPending
   const hasGeneratedEmail = Boolean(job.generated_body || emailBody)
-  const isSent = job.status === "Sent" || job.status === "Completed"
+  const isSent = job.status === "Sent"
 
   const getScoreColor = (score?: number) => {
     if (score === undefined) return "text-muted-foreground"
@@ -198,7 +212,7 @@ export function DetailPanel({ job, onStatusChange }: DetailPanelProps) {
                 <option value="Generated">Připraveno</option>
                 <option value="Sending">Odesílám</option>
                 <option value="Sent">Posláno</option>
-                <option value="Completed">Hotovo</option>
+                <option value="Completed">Dokončeno</option>
                 <option value="Failed">Selhalo</option>
                 <option value="Interview">Pohovor</option>
                 <option value="Rejected">Zamítnuto</option>
@@ -206,8 +220,64 @@ export function DetailPanel({ job, onStatusChange }: DetailPanelProps) {
               </select>
             </div>
             
+            {/* UPOZORNĚNÍ: Chybí životopis / profil */}
+            {isMissingCv && (
+              <div className="mt-4 p-4 rounded-xl border border-amber-500/30 bg-amber-500/10 text-amber-900 dark:text-amber-200 text-sm flex items-start justify-between gap-4 shadow-sm">
+                <div className="flex items-start gap-3">
+                  <AlertTriangle className="w-5 h-5 text-amber-600 dark:text-amber-400 shrink-0 mt-0.5" />
+                  <div>
+                    <h4 className="font-semibold text-amber-950 dark:text-amber-100">Chybí životopis nebo profil</h4>
+                    <p className="text-xs text-amber-800/90 dark:text-amber-300/90 mt-0.5">
+                      Systém o vás zatím nemá žádné informace. Nahrajte svůj životopis (PDF) nebo vyplňte profil, aby AI mohla vyhodnotit shodu s touto pozicí a vytvořit personalizovaný dopis.
+                    </p>
+                  </div>
+                </div>
+                {onOpenSettings && (
+                  <Button 
+                    size="sm" 
+                    variant="outline" 
+                    onClick={() => onOpenSettings("profile")}
+                    className="shrink-0 border-amber-500/40 text-amber-900 dark:text-amber-200 hover:bg-amber-500/20 text-xs font-semibold gap-1.5"
+                  >
+                    <User className="w-3.5 h-3.5" />
+                    Doplnit profil / CV
+                  </Button>
+                )}
+              </div>
+            )}
+
+            {/* UPOZORNĚNÍ: Chybí nebo je neplatný API klíč */}
+            {isMissingKey && (
+              <div className="mt-3 p-4 rounded-xl border border-red-500/30 bg-red-500/10 text-red-900 dark:text-red-200 text-sm flex items-start justify-between gap-4 shadow-sm">
+                <div className="flex items-start gap-3">
+                  <Key className="w-5 h-5 text-red-600 dark:text-red-400 shrink-0 mt-0.5" />
+                  <div>
+                    <h4 className="font-semibold text-red-950 dark:text-red-100">
+                      {isKeyProjectFormat ? "Neplatný formát API klíče Gemini" : "Chybí API klíč pro AI"}
+                    </h4>
+                    <p className="text-xs text-red-800/90 dark:text-red-300/90 mt-0.5">
+                      {isKeyProjectFormat 
+                        ? "V nastavení je zadáno ID projektu Google Cloud ('gen-lang-client...') místo platného API klíče. Získejte správný klíč zdarma na Google AI Studio (začíná na AIzaSy...)."
+                        : "Pro spuštění AI hodnocení a generování e-mailů je potřeba nastavit platný API klíč v Nastavení."}
+                    </p>
+                  </div>
+                </div>
+                {onOpenSettings && (
+                  <Button 
+                    size="sm" 
+                    variant="outline" 
+                    onClick={() => onOpenSettings("ai")}
+                    className="shrink-0 border-red-500/40 text-red-900 dark:text-red-200 hover:bg-red-500/20 text-xs font-semibold gap-1.5"
+                  >
+                    <Settings className="w-3.5 h-3.5" />
+                    Nastavit API klíč
+                  </Button>
+                )}
+              </div>
+            )}
+
             {/* AI Hodnocení (Match Score) pokud existuje */}
-            {job.match_score !== undefined && (
+            {job.match_score !== undefined ? (
               <div className="mt-6 p-4 rounded-xl border border-white/20 bg-white/40 dark:bg-black/20 flex items-start gap-4 shadow-sm">
                 <div className={cn("text-3xl font-bold pt-1", getScoreColor(job.match_score))}>
                   {job.match_score}%
@@ -217,13 +287,54 @@ export function DetailPanel({ job, onStatusChange }: DetailPanelProps) {
                   <p className="text-muted-foreground mt-1 text-sm">{job.match_reason}</p>
                 </div>
               </div>
+            ) : (
+              /* Informační box, pokud shoda ještě nebyla spočítána */
+              <div className="mt-6 p-4 rounded-xl border border-white/10 bg-white/20 dark:bg-black/10 flex items-start justify-between gap-4 text-xs text-muted-foreground shadow-sm">
+                <div className="flex items-start gap-3">
+                  <Sparkles className="w-4 h-4 text-primary shrink-0 mt-0.5" />
+                  <div>
+                    <span className="font-semibold text-foreground text-sm block mb-0.5">AI Hodnocení shody (Match Score)</span>
+                    <p>
+                      {hasValidConfig 
+                        ? "Pro tuto pozici zatím nebyla provedena AI analýza. Klikněte níže na „Vygenerovat e-mail pomocí AI“ pro výpočet shody a argumentů."
+                        : "Pro výpočet AI shody a doporučení je potřeba mít nahraný životopis a platný API klíč v Nastavení."}
+                    </p>
+                  </div>
+                </div>
+                {!hasValidConfig && onOpenSettings && (
+                  <Button 
+                    size="sm" 
+                    variant="ghost" 
+                    onClick={() => onOpenSettings(isMissingCv ? "profile" : "ai")}
+                    className="shrink-0 text-xs font-medium text-primary hover:bg-primary/10 gap-1"
+                  >
+                    <Settings className="w-3.5 h-3.5" />
+                    Nastavení
+                  </Button>
+                )}
+              </div>
             )}
 
             {/* Chybová hláška */}
             {job.status === "Failed" && job.error_logs && (
-              <div className="mt-6 p-4 rounded-xl border border-red-500/30 bg-red-500/10 text-red-700 dark:text-red-300 text-sm flex flex-col gap-1">
-                <span className="font-semibold">Chyba zpracování inzerátu:</span>
-                <p className="whitespace-pre-wrap font-mono text-xs">{job.error_logs}</p>
+              <div className="mt-6 p-4 rounded-xl border border-red-500/30 bg-red-500/10 text-red-700 dark:text-red-300 text-sm flex flex-col gap-2">
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center gap-2">
+                    <AlertTriangle className="w-4 h-4 text-red-600 dark:text-red-400 shrink-0" />
+                    <span className="font-semibold">Chyba při zpracování AI:</span>
+                  </div>
+                  {onOpenSettings && (
+                    <Button 
+                      size="sm" 
+                      variant="outline" 
+                      onClick={() => onOpenSettings("ai")}
+                      className="h-7 text-xs border-red-400 text-red-700 dark:text-red-300 hover:bg-red-500/20"
+                    >
+                      Přejít do Nastavení
+                    </Button>
+                  )}
+                </div>
+                <p className="whitespace-pre-wrap font-sans text-xs leading-relaxed opacity-90">{job.error_logs}</p>
               </div>
             )}
           </div>
@@ -330,13 +441,61 @@ export function DetailPanel({ job, onStatusChange }: DetailPanelProps) {
                       AI prostuduje požadavky tohoto inzerátu, porovná je s vaším životopisem, spočítá shodu a vytvoří personalizovaný text e-mailu.
                     </p>
                   </div>
+
+                  {!hasValidConfig ? (
+                    <div className="w-full max-w-md p-4 rounded-xl border border-amber-500/30 bg-amber-500/10 text-left space-y-3 text-xs">
+                      <div className="flex items-center gap-2 font-semibold text-amber-900 dark:text-amber-200">
+                        <AlertTriangle className="w-4 h-4 text-amber-600 dark:text-amber-400 shrink-0" />
+                        <span>Před generováním je nutné doplnit údaje v Nastavení:</span>
+                      </div>
+                      <div className="space-y-2">
+                        {isMissingCv && (
+                          <div className="flex items-center justify-between bg-white/50 dark:bg-black/40 p-2 rounded-lg">
+                            <span className="text-muted-foreground">📄 Životopis (CV v PDF)</span>
+                            {onOpenSettings && (
+                              <Button 
+                                size="sm" 
+                                variant="outline" 
+                                onClick={() => onOpenSettings("profile")} 
+                                className="h-6 text-[11px] px-2 font-semibold text-primary"
+                              >
+                                Nahrát CV
+                              </Button>
+                            )}
+                          </div>
+                        )}
+                        {isMissingKey && (
+                          <div className="flex items-center justify-between bg-white/50 dark:bg-black/40 p-2 rounded-lg">
+                            <span className="text-muted-foreground">🔑 Platný AI API klíč (Gemini)</span>
+                            {onOpenSettings && (
+                              <Button 
+                                size="sm" 
+                                variant="outline" 
+                                onClick={() => onOpenSettings("ai")} 
+                                className="h-6 text-[11px] px-2 font-semibold text-primary"
+                              >
+                                Nastavit klíč
+                              </Button>
+                            )}
+                          </div>
+                        )}
+                      </div>
+                    </div>
+                  ) : null}
+
                   <Button 
                     size="lg"
-                    onClick={() => generateMutation.mutate(job.id)}
+                    onClick={() => {
+                      if (!hasValidConfig && onOpenSettings) {
+                        onOpenSettings(isMissingCv ? "profile" : "ai")
+                        return
+                      }
+                      generateMutation.mutate(job.id)
+                    }}
                     className="gap-2 px-8 h-12 text-base font-semibold shadow-lg hover:shadow-primary/25 hover:scale-[1.02] transition-all bg-primary text-primary-foreground"
                   >
                     <Sparkles className="w-5 h-5" />
-                    Vygenerovat e-mail pomocí AI
+                    {hasValidConfig ? "Vygenerovat e-mail pomocí AI" : "Doplnit nastavení pro AI"}
                   </Button>
                 </div>
               ) : (

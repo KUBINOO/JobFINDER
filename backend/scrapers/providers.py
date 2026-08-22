@@ -1,5 +1,6 @@
 import logging
 import httpx
+import re
 from urllib.parse import urljoin
 from typing import List, Optional
 from selectolax.parser import HTMLParser
@@ -9,6 +10,21 @@ from scrapers.cleaner import DOMCleaner
 from schemas import ScrapedJob
 
 logger = logging.getLogger(__name__)
+
+def clean_title_text(raw_title: str) -> str:
+    """Odstraní z titulku inzerátu generické prefixy portálů."""
+    if not raw_title:
+        return ""
+    t = raw_title.strip()
+    prefixes = [
+        "Detail pozice | ", "Detail nabídky | ", "Nabídka práce - ", "Volné místo - ",
+        "Detail pozice - ", "Pracovní nabídka: ", "Pozice: "
+    ]
+    for p in prefixes:
+        if t.lower().startswith(p.lower()):
+            t = t[len(p):].strip()
+    return t
+
 
 class CzechJobScraper(AbstractCSSScraper):
     """
@@ -36,7 +52,6 @@ class CzechJobScraper(AbstractCSSScraper):
         Stáhne obsah inzerátu z vloženého iframe a vyčistí jeho text.
         """
         try:
-            # Sestavení absolutní URL adresy iframe
             full_iframe_url = urljoin(base_url, iframe_src)
             logger.info(f"Detekován vložený iframe s inzerátem: {full_iframe_url}")
             
@@ -51,7 +66,6 @@ class CzechJobScraper(AbstractCSSScraper):
             if len(iframe_text.strip()) >= 150:
                 return iframe_text
                 
-            # Pokud přímý text nestačí, zkusíme sémantickou extrakci
             semantic_text = DOMCleaner.extract_semantic_text(iframe_tree)
             if len(semantic_text.strip()) >= 150:
                 return semantic_text
@@ -69,6 +83,18 @@ class CzechJobScraper(AbstractCSSScraper):
         try:
             response = await self.client.get(url)
             tree = HTMLParser(response.text)
+
+            # Kontrola meta refresh přesměrování (např. jobs.cz -> o2.jobs.cz)
+            meta_refresh = tree.css_first('meta[http-equiv="refresh"], meta[http-equiv="REFRESH"]')
+            if meta_refresh:
+                content = meta_refresh.attributes.get("content", "")
+                match = re.search(r"url=['\"]?([^'\";\s]+)", content, re.IGNORECASE)
+                if match:
+                    redirect_target = urljoin(url, match.group(1))
+                    logger.info(f"Nalezeno meta refresh přesměrování na: {redirect_target}")
+                    response = await self.client.get(redirect_target)
+                    tree = HTMLParser(response.text)
+                    url = str(response.url)
             
             title = ""
             company = ""
@@ -81,7 +107,7 @@ class CzechJobScraper(AbstractCSSScraper):
                         d = json.loads(s.text())
                         if isinstance(d, dict) and d.get("@type") == "JobPosting":
                             if not title and d.get("title"):
-                                title = str(d.get("title")).strip()
+                                title = clean_title_text(str(d.get("title")).strip())
                             if not company:
                                 org = d.get("hiringOrganization")
                                 if isinstance(org, dict) and org.get("name"):
@@ -91,7 +117,6 @@ class CzechJobScraper(AbstractCSSScraper):
                             if not description and d.get("description"):
                                 ld_desc = str(d.get("description")).strip()
                                 if len(ld_desc) >= 150:
-                                    # Vyčistíme HTML tagy z popisu v JSON-LD
                                     desc_tree = HTMLParser(ld_desc)
                                     description = DOMCleaner.extract_clean_text(desc_tree)
                     except Exception:
@@ -104,15 +129,18 @@ class CzechJobScraper(AbstractCSSScraper):
                     '[data-qa="job-ad-title"]',
                     'h1.job-title',
                     'h1',
+                    'meta[property="og:title"]',
                     'title'
                 ]
                 for selector in title_selectors:
                     node = tree.css_first(selector)
                     if node:
-                        extracted_title = node.text(strip=True)
+                        extracted_title = node.attributes.get("content") if node.tag == "meta" else node.text(strip=True)
                         if extracted_title:
-                            title = extracted_title
-                            break
+                            cleaned_t = clean_title_text(extracted_title)
+                            if cleaned_t and not cleaned_t.lower().startswith("detail pozice"):
+                                title = cleaned_t
+                                break
 
             # 2. Extrakce názvu společnosti pokud není z JSON-LD
             if not company:
@@ -129,7 +157,7 @@ class CzechJobScraper(AbstractCSSScraper):
                     node = tree.css_first(selector)
                     if node:
                         extracted_company = node.text(strip=True)
-                        if extracted_company:
+                        if extracted_company and "atmoskop" not in extracted_company.lower():
                             company = extracted_company
                             break
 
@@ -142,13 +170,13 @@ class CzechJobScraper(AbstractCSSScraper):
                         parts = full_title.split(" – ")
                         if len(parts) >= 2:
                             if not title or title == "Neznámá pozice":
-                                title = parts[0].strip()
+                                title = clean_title_text(parts[0].strip())
                             company = parts[-1].split("|")[0].strip()
                     elif " - " in full_title:
                         parts = full_title.split(" - ")
                         if len(parts) >= 2:
                             if not title or title == "Neznámá pozice":
-                                title = parts[0].strip()
+                                title = clean_title_text(parts[0].strip())
                             company = parts[-1].split("|")[0].strip()
 
             if not title:
@@ -193,7 +221,6 @@ class CzechJobScraper(AbstractCSSScraper):
 
             # 5. Záložní fallback: Čistý body fallback pouze se sémantickými odstavci (<p>, <li>, <h3>, <h4>)
             if not description or len(description.strip()) < 150:
-                # Vyčistíme celý strom od menu, patiček, patičkových linků atd.
                 DOMCleaner.clean_tree(tree)
                 fallback_container = tree.css_first("main") or tree.css_first("article") or tree.css_first("body")
                 if fallback_container:
@@ -211,8 +238,8 @@ class CzechJobScraper(AbstractCSSScraper):
                         if jina_res.status_code == 200:
                             jina_text = jina_res.text
                             if "Title: " in jina_text:
-                                jina_title = jina_text.split("Title: ")[1].split("\n")[0].strip()
-                                if jina_title and title == "Neznámá pozice":
+                                jina_title = clean_title_text(jina_text.split("Title: ")[1].split("\n")[0].strip())
+                                if jina_title and (title == "Neznámá pozice" or title.startswith("Detail pozice")):
                                     title = jina_title
                             
                             cleaned_jina = jina_text
@@ -229,7 +256,7 @@ class CzechJobScraper(AbstractCSSScraper):
 
             return ScrapedJob(
                 source_url=url, # type: ignore
-                title=title,
+                title=clean_title_text(title),
                 company_name=company,
                 description=description
             )
@@ -274,7 +301,6 @@ class StartupJobsScraper(CzechJobScraper):
 
     async def extract_job_details(self, url: str) -> ScrapedJob:
         job = await super().extract_job_details(url)
-        # Pokud je firma neznámá, pokusíme se ji vytáhnout z Nuxt dat
         if job.company_name == "Neznámá společnost":
             import json
             try:

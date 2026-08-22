@@ -3,6 +3,8 @@ import { apiClient } from '../api/client';
 
 export interface UserSettings {
   id: number;
+  full_name: string | null;
+  phone_number: string | null;
   age: number | null;
   education: string | null;
   industry: string | null;
@@ -12,9 +14,13 @@ export interface UserSettings {
   llm_model: string;
   llm_api_key: string | null;
   ollama_host: string | null;
+  tone_of_voice?: string | null;
+  custom_prompt?: string | null;
   smtp_email: string;
   smtp_password: string;
   smtp_port: number;
+  scraper_delay_min?: number | null;
+  scraper_delay_max?: number | null;
 }
 
 const fetchSettings = async (): Promise<UserSettings> => {

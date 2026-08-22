@@ -28,10 +28,20 @@ async def _run_scraping(session: Session, application: Application) -> None:
     scraper = get_scraper(job.source_url)
     scraped_job = await scraper.extract_job_details(job.source_url)
     
-    # Aktualizace detailů inzerátu v databázi
-    job.description = scraped_job.description
-    job.title = scraped_job.title
-    job.company_name = scraped_job.company_name
+    # Aktualizace detailů inzerátu v databázi (nepřepisovat kvalitní název generickými texty)
+    if scraped_job.description:
+        job.description = scraped_job.description
+    
+    if scraped_job.title and scraped_job.title not in ["Neznámá pozice", "Zatím nenačteno"] and not scraped_job.title.lower().startswith("detail pozice"):
+        job.title = scraped_job.title
+    elif not job.title or job.title in ["Zatím nenačteno", "Neznámá pozice"]:
+        job.title = scraped_job.title or "Pracovní pozice"
+
+    if scraped_job.company_name and scraped_job.company_name not in ["Neznámá společnost", "Zatím nenačteno"] and "atmoskop" not in scraped_job.company_name.lower():
+        job.company_name = scraped_job.company_name
+    elif not job.company_name or job.company_name in ["Zatím nenačteno", "Neznámá společnost"]:
+        job.company_name = scraped_job.company_name or "Neznámá společnost"
+
     job.scraped_at = datetime.now(timezone.utc)
     
     session.add(job)
@@ -52,7 +62,7 @@ async def _run_llm_generation(session: Session, application: Application) -> Non
     user = application.user
     job = application.job_posting
     
-    # Získání nastavení s cestou k PDF životopisu
+    # Získání nastavení s profilem a životopisem
     user_prefs = session.get(UserPreferences, 1)
     
     cv_text = ""
@@ -69,7 +79,6 @@ async def _run_llm_generation(session: Session, application: Application) -> Non
         if os.path.exists(uploads_dir):
             pdf_files = [os.path.join(uploads_dir, f) for f in os.listdir(uploads_dir) if f.lower().endswith(".pdf")]
             if pdf_files:
-                # Seřadíme podle data úpravy a vezmeme nejnovější
                 pdf_files.sort(key=lambda x: os.path.getmtime(x), reverse=True)
                 latest_pdf = pdf_files[0]
                 try:
@@ -82,62 +91,62 @@ async def _run_llm_generation(session: Session, application: Application) -> Non
                 except Exception as e:
                     logger.error(f"Nepodařilo se extrahovat text z nalezeného PDF ({latest_pdf}): {e}")
 
-    # Fallback na textový profil z preferencí nebo User modelu, pokud PDF není vůbec
-    if not cv_text or not cv_text.strip():
-        profile_parts = []
-        if user_prefs:
-            if user_prefs.full_name: profile_parts.append(f"Jméno: {user_prefs.full_name}")
-            if user_prefs.education: profile_parts.append(f"Vzdělání: {user_prefs.education}")
-            if user_prefs.industry: profile_parts.append(f"Obor / Zaměření: {user_prefs.industry}")
-            if user_prefs.linkedin_url: profile_parts.append(f"LinkedIn: {user_prefs.linkedin_url}")
-        if user and user.cv_summary:
-            profile_parts.append(f"Shrnutí zkušeností: {user.cv_summary}")
-            
-        if profile_parts:
-            cv_text = "\n".join(profile_parts)
-        else:
-            cv_text = "Životopis není k dispozici."
-
-    llm_model = None
+    # Sestavení kompletního profilu uchazeče (kombinace CV a textových polí)
+    profile_parts = []
     if user_prefs:
-
-        llm_model = user_prefs.llm_model
+        if user_prefs.full_name: profile_parts.append(f"Jméno: {user_prefs.full_name}")
+        if user_prefs.phone_number: profile_parts.append(f"Telefon: {user_prefs.phone_number}")
+        if user_prefs.education: profile_parts.append(f"Vzdělání: {user_prefs.education}")
+        if user_prefs.industry: profile_parts.append(f"Obor / Specializace: {user_prefs.industry}")
+        if user_prefs.linkedin_url: profile_parts.append(f"LinkedIn: {user_prefs.linkedin_url}")
+        if user_prefs.custom_prompt: profile_parts.append(f"Specifické instrukce a preference uchazeče: {user_prefs.custom_prompt}")
+    if user and user.cv_summary:
+        profile_parts.append(f"Shrnutí zkušeností: {user.cv_summary}")
         
-        # Mapování modelů na aktuální verze
-        if llm_model in ["gemini-1.5-flash", "gemini-flash-latest"]:
-            llm_model = "gemini-1.5-flash"
-        elif llm_model in ["gemini-1.5-pro", "gemini-pro-latest"]:
-            llm_model = "gemini-1.5-pro"
+    full_user_context_parts = []
+    if cv_text and cv_text.strip():
+        full_user_context_parts.append(f"=== TEXT EXTRAHOVANÝ Z ŽIVOTOPISU (CV PDF) ===\n{cv_text.strip()}")
+    if profile_parts:
+        full_user_context_parts.append(f"=== DOPLŇUJÍCÍ PROFIL UŽIVATELE Z NASTAVENÍ ===\n" + "\n".join(profile_parts))
+        
+    full_user_context = "\n\n".join(full_user_context_parts).strip()
+    if not full_user_context:
+        raise ValueError("Chybí podklady pro AI: Nemáte nahraný životopis (PDF) ani vyplněný profil v Nastavení. Doplňte prosím své údaje, aby AI mohla vyhodnotit shodu s pozicí.")
 
-        api_key = user_prefs.llm_api_key
-        if user_prefs.llm_provider == "Google Gemini":
-            if not llm_model.startswith("gemini/"):
-                llm_model = f"gemini/{llm_model}"
-            if api_key:
-                os.environ["GEMINI_API_KEY"] = api_key
-                os.environ["GOOGLE_API_KEY"] = api_key
-        elif user_prefs.llm_provider == "OpenAI":
-            if api_key:
-                os.environ["OPENAI_API_KEY"] = api_key
-        elif user_prefs.llm_provider == "Anthropic":
-            if api_key:
-                os.environ["ANTHROPIC_API_KEY"] = api_key
-        elif user_prefs.llm_provider == "Ollama":
-            if not llm_model.startswith("ollama/"):
-                llm_model = f"ollama/{llm_model}"
-    else:
-        api_key = None
+    llm_provider = user_prefs.llm_provider if user_prefs else "Google Gemini"
+    llm_model = (user_prefs.llm_model if user_prefs and user_prefs.llm_model else "gemini-1.5-flash").strip()
+    api_key = (user_prefs.llm_api_key if user_prefs and user_prefs.llm_api_key else "").strip()
+
+    # Validace a konfigurace poskytovatele LLM
+    if llm_provider == "Google Gemini":
+        if not api_key:
+            raise ValueError("Chybí API klíč pro Google Gemini. Zadejte prosím svůj platný API klíč v Nastavení -> AI a Chování (klíč získáte zdarma na aistudio.google.com).")
+        if api_key.startswith("gen-lang-client"):
+            raise ValueError("Neplatný API klíč: Zadali jste Google Cloud Project ID ('gen-lang-client...') místo Gemini API klíče. Získejte správný klíč zdarma na https://aistudio.google.com/app/apikey (začíná na 'AIzaSy...').")
+        if not llm_model.startswith("gemini/"):
+            llm_model = f"gemini/{llm_model}"
+        os.environ["GEMINI_API_KEY"] = api_key
+        os.environ["GOOGLE_API_KEY"] = api_key
+    elif llm_provider == "OpenAI":
+        if not api_key:
+            raise ValueError("Chybí API klíč pro OpenAI. Zadejte svůj API klíč (sk-...) v Nastavení -> AI a Chování.")
+        os.environ["OPENAI_API_KEY"] = api_key
+    elif llm_provider == "Anthropic":
+        if not api_key:
+            raise ValueError("Chybí API klíč pro Anthropic. Zadejte svůj API klíč (sk-ant-...) v Nastavení -> AI a Chování.")
+        os.environ["ANTHROPIC_API_KEY"] = api_key
+    elif llm_provider == "Ollama":
+        if not llm_model.startswith("ollama/"):
+            llm_model = f"ollama/{llm_model}"
                 
-    llm_generator = CoverLetterGenerator(model=llm_model, api_key=api_key)
+    llm_generator = CoverLetterGenerator(model=llm_model, api_key=api_key if api_key else None)
     draft = await llm_generator.generate_email(
-
-        user_cv=cv_text,
+        user_cv=full_user_context,
         job_desc=job.description or "Popis pozice není k dispozici.",
         job_title=job.title or job.company_name or "Neznámá pozice"
     )
     
     # Krok 3: Sestavení výsledného e-mailu (Assembly)
-    # Složení 6 polí do jednoho řetězce, oddělených dvojitým odřádkováním
     assembled_body = "\n\n".join([
         draft.osloveni,
         draft.uvod,
@@ -230,13 +239,13 @@ async def process_job_application(application_id: int) -> None:
             
             await _run_scraping(session, application)
             
-            # Po úspěšném scrapingu nastavíme stav na PENDING (připraveno pro uživatele)
-            application.status = ApplicationStatus.PENDING
+            # Po úspěšném scrapingu nastavíme stav na COMPLETED (dokončeno stažení inzerátu)
+            application.status = ApplicationStatus.COMPLETED
             application.updated_at = datetime.now(timezone.utc)
             application.error_logs = None
             session.add(application)
             session.commit()
-            logger.info(f"Úspěšně stažen inzerát pro žádost {application_id}. Připraveno k manuálnímu spuštění generování uživatelem.")
+            logger.info(f"Úspěšně stažen inzerát pro žádost {application_id}. Scraping dokončen.")
             
         except JobContentValidationError as val_err:
 
@@ -283,10 +292,19 @@ async def generate_application_email(application_id: int) -> None:
             logger.info(f"Úspěšně vygenerován motivační e-mail pro žádost {application_id}.")
         except Exception as e:
             logger.error(f"Chyba při generování e-mailu pro žádost {application_id}: {e}")
-            error_msg = f"{str(e)}\n\n{traceback.format_exc()}"
+            err_msg = str(e)
+            if "API key not valid" in err_msg or "API_KEY_INVALID" in err_msg:
+                friendly_error = "Neplatný API klíč: Poskytovatel AI odmítl zadaný klíč. Zkontrolujte prosím svůj API klíč v Nastavení -> AI a Chování (pro Google Gemini získejte klíč zdarma na aistudio.google.com)."
+            elif "gen-lang-client" in err_msg or "Chybí podklady" in err_msg or "Chybí API klíč" in err_msg or "Neplatný API klíč" in err_msg:
+                friendly_error = err_msg
+            elif "AuthenticationError" in err_msg:
+                friendly_error = f"Chyba autentizace AI: Zkontrolujte platnost svého API klíče v Nastavení -> AI a Chování ({err_msg})."
+            else:
+                friendly_error = f"Chyba při generování: {err_msg}"
+                
             session.rollback()
             application.status = ApplicationStatus.FAILED
-            application.error_logs = f"Chyba při generování e-mailu: {error_msg}"
+            application.error_logs = friendly_error
             application.updated_at = datetime.now(timezone.utc)
             session.add(application)
             session.commit()

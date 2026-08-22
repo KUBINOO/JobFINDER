@@ -36,7 +36,7 @@ const statusLabelMap: Record<JobStatus, string> = {
   Generated: "Připraveno",
   Sending: "Odesílám",
   Sent: "Posláno",
-  Completed: "Hotovo",
+  Completed: "Dokončeno",
   Failed: "Selhalo",
   Interview: "Pohovor",
   Rejected: "Zamítnuto",

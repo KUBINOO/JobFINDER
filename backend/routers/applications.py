@@ -35,24 +35,35 @@ async def explore_jobs(explore_req: ExploreRequest, background_tasks: Background
 
     from scrapers.search import JobSearchScraper
     scraper = JobSearchScraper()
-    job_urls = await scraper.search_jobs(
+    search_results = await scraper.search_jobs(
         query=explore_req.query, 
         count=explore_req.count,
         sources=explore_req.sources
     )
 
-    if not job_urls:
-        raise HTTPException(status_code=404, detail="Žádné pozice nebyly nalezeny pro zadané klíčové slovo.")
+    if not search_results:
+        raise HTTPException(status_code=404, detail="Žádné relevantní pozice nebyly nalezeny pro zadané klíčové slovo.")
 
     created_apps = []
     
-    for url in job_urls:
-        job = session.exec(select(JobPosting).where(JobPosting.source_url == url)).first()
+    for item in search_results:
+        job = session.exec(select(JobPosting).where(JobPosting.source_url == item.url)).first()
         if not job:
-            job = JobPosting(source_url=url, title="Zatím nenačteno", company_name="Zatím nenačteno")
+            job = JobPosting(
+                source_url=item.url, 
+                title=item.title or "Zatím nenačteno", 
+                company_name=item.company or "Zatím nenačteno"
+            )
             session.add(job)
             session.commit()
             session.refresh(job)
+        else:
+            if (not job.title or job.title in ["Zatím nenačteno", "Neznámá pozice"]) and item.title:
+                job.title = item.title
+            if (not job.company_name or job.company_name in ["Zatím nenačteno", "Neznámá společnost"]) and item.company:
+                job.company_name = item.company
+            session.add(job)
+            session.commit()
         
         application = session.exec(select(Application).where(Application.job_id == job.id).where(Application.user_id == user.id)).first()
         if not application:
@@ -68,7 +79,11 @@ async def explore_jobs(explore_req: ExploreRequest, background_tasks: Background
         background_tasks.add_task(process_job_application, application.id)
         created_apps.append(application.id)
 
-    return {"message": f"Nalezeno {len(job_urls)} pozic. Spouštím analýzu.", "count": len(job_urls), "urls": job_urls}
+    return {
+        "message": f"Nalezeno {len(search_results)} relevantních pozic. Spouštím analýzu.", 
+        "count": len(search_results), 
+        "urls": [item.url for item in search_results]
+    }
 
 @router.get("/", response_model=List[dict])
 def get_applications(session: Session = Depends(get_session)):

@@ -1,3 +1,4 @@
+from typing import Optional
 from fastapi import APIRouter, HTTPException, Depends
 from sqlmodel import Session
 from database import get_session
@@ -63,6 +64,16 @@ def get_settings(session: Session = Depends(get_session)):
         raise HTTPException(status_code=404, detail="Nastavení nenalezeno")
     return user_prefs
 
+@router.delete("/api/settings/reset")
+def reset_settings(session: Session = Depends(get_session)):
+    """Resetuje uživatelská nastavení a profil, aby se znovu zobrazil úvodní Onboarding Wizard."""
+    user_prefs = session.get(UserPreferences, 1)
+    if user_prefs:
+        session.delete(user_prefs)
+    session.commit()
+    return {"message": "Nastavení a profil byly úspěšně resetovány. Můžete projít onboardingem."}
+
+
 
 from pydantic import BaseModel
 import aiosmtplib
@@ -88,3 +99,64 @@ async def test_smtp(req: SmtpTestRequest):
         return {"message": "Připojení k SMTP bylo úspěšné!"}
     except Exception as e:
         raise HTTPException(status_code=400, detail=f"Chyba SMTP: {str(e)}")
+
+class LlmTestRequest(BaseModel):
+    provider: str = "Google Gemini"
+    model: str = "gemini-1.5-flash"
+    api_key: Optional[str] = None
+    ollama_host: Optional[str] = None
+
+@router.post("/api/settings/test-llm")
+async def test_llm(req: LlmTestRequest):
+    from litellm import acompletion
+    
+    model_name = req.model.strip() if req.model else "gemini-1.5-flash"
+    api_key = req.api_key.strip() if req.api_key else ""
+    
+    if req.provider == "Google Gemini":
+        if not api_key:
+            raise HTTPException(
+                status_code=400, 
+                detail="Chybí API klíč pro Google Gemini. Zadejte platný API klíč z Google AI Studio (začíná na AIzaSy...)."
+            )
+        if api_key.startswith("gen-lang-client"):
+            raise HTTPException(
+                status_code=400, 
+                detail="Zadali jste Google Cloud Project ID ('gen-lang-client...'), nikoli Gemini API klíč. Získejte správný API klíč zdarma na https://aistudio.google.com/app/apikey (začíná na 'AIzaSy...')."
+            )
+        if not model_name.startswith("gemini/"):
+            model_name = f"gemini/{model_name}"
+    elif req.provider == "OpenAI":
+        if not api_key:
+            raise HTTPException(status_code=400, detail="Chybí API klíč pro OpenAI (začíná na sk-...).")
+    elif req.provider == "Anthropic":
+        if not api_key:
+            raise HTTPException(status_code=400, detail="Chybí API klíč pro Anthropic (začíná na sk-ant-...).")
+    elif req.provider == "Ollama":
+        if not model_name.startswith("ollama/"):
+            model_name = f"ollama/{model_name}"
+            
+    try:
+        kwargs = {
+            "model": model_name,
+            "messages": [{"role": "user", "content": "Odpovez pouze jednim slovem: OK"}],
+            "max_tokens": 10,
+        }
+        if api_key:
+            kwargs["api_key"] = api_key
+        if req.ollama_host:
+            kwargs["api_base"] = req.ollama_host
+            
+        resp = await acompletion(**kwargs)
+        content = resp.choices[0].message.content or "OK"
+        return {"message": f"Spojení s AI ({req.provider} - {req.model}) funguje bezchybně! (Odpověď modelu: {content.strip()})"}
+    except Exception as e:
+        err_str = str(e)
+        if "API key not valid" in err_str or "API_KEY_INVALID" in err_str:
+            raise HTTPException(
+                status_code=400, 
+                detail="Neplatný API klíč: Poskytovatel odmítl zadaný klíč. Ujistěte se, že používáte platný API klíč z Google AI Studio (začínající na AIzaSy...)."
+            )
+        if "AuthenticationError" in err_str:
+            raise HTTPException(status_code=400, detail=f"Chyba autentizace AI: {err_str}")
+        raise HTTPException(status_code=400, detail=f"Chyba při komunikaci s AI: {err_str}")

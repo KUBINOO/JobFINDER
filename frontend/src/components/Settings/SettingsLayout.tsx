@@ -1,8 +1,8 @@
-import React, { useState } from "react"
+import React, { useState, useEffect } from "react"
 import { motion, AnimatePresence } from "framer-motion"
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query"
 import axios from "axios"
-import { User, Cpu, Mail, Database, Save, Loader2, AlertTriangle, UploadCloud, FileText, CheckCircle2 } from "lucide-react"
+import { User, Cpu, Mail, Database, Save, Loader2, AlertTriangle, UploadCloud, FileText, CheckCircle2, Sparkles, ExternalLink, HelpCircle } from "lucide-react"
 
 import { Input } from "../ui/input"
 import { Button } from "../ui/button"
@@ -11,9 +11,19 @@ import { Textarea } from "../ui/textarea"
 
 const API_BASE = "http://localhost:8000/api"
 
-export function SettingsLayout() {
-  const [activeTab, setActiveTab] = useState("profile")
+interface SettingsLayoutProps {
+  initialTab?: string;
+}
+
+export function SettingsLayout({ initialTab = "profile" }: SettingsLayoutProps) {
+  const [activeTab, setActiveTab] = useState(initialTab)
   const queryClient = useQueryClient()
+
+  useEffect(() => {
+    if (initialTab) {
+      setActiveTab(initialTab)
+    }
+  }, [initialTab])
 
   const { data: settings, isLoading } = useQuery({
     queryKey: ["settings"],
@@ -36,6 +46,19 @@ export function SettingsLayout() {
       const detail = err.response?.data?.detail;
       const errorMsg = Array.isArray(detail) ? JSON.stringify(detail) : detail || err.message;
       alert("Chyba při ukládání nastavení: " + errorMsg)
+    }
+  })
+
+  const testLlmMutation = useMutation({
+    mutationFn: async (llmData: any) => {
+      const res = await axios.post(`${API_BASE}/settings/test-llm`, llmData)
+      return res.data
+    },
+    onSuccess: (data) => {
+      alert("✅ Úspěch: " + data.message)
+    },
+    onError: (err: any) => {
+      alert("❌ Chyba AI: " + (err.response?.data?.detail || err.message))
     }
   })
 
@@ -63,6 +86,20 @@ export function SettingsLayout() {
     },
     onError: (err: any) => {
       alert("Chyba při mazání: " + (err.response?.data?.detail || err.message))
+    }
+  })
+
+  const resetOnboardingMutation = useMutation({
+    mutationFn: async () => {
+      const res = await axios.delete(`${API_BASE}/settings/reset`)
+      return res.data
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["settings"] })
+      window.location.reload()
+    },
+    onError: (err: any) => {
+      alert("Chyba při resetování nastavení: " + (err.response?.data?.detail || err.message))
     }
   })
 
@@ -109,6 +146,30 @@ export function SettingsLayout() {
     updateMutation.mutate(finalSettings)
   }
 
+  const handleTestLlm = (e: React.MouseEvent) => {
+    e.preventDefault()
+    const form = (e.currentTarget as HTMLElement).closest("form")
+    if (!form) return
+    const formData = new FormData(form)
+    
+    const provider = (formData.get("llm_provider") as string) || settings.llm_provider || "Google Gemini"
+    const model = (formData.get("llm_model") as string) || settings.llm_model || "gemini-1.5-flash"
+    const api_key = (formData.get("llm_api_key") as string) ?? settings.llm_api_key ?? ""
+    const ollama_host = (formData.get("ollama_host") as string) || settings.ollama_host || null
+
+    if (provider !== "Ollama" && (!api_key || !api_key.trim())) {
+      alert("Před testem prosím zadejte API klíč.")
+      return
+    }
+
+    testLlmMutation.mutate({
+      provider,
+      model,
+      api_key,
+      ollama_host
+    })
+  }
+
   const handleTestSmtp = () => {
     const host = prompt("Zadejte SMTP Host:", "smtp.gmail.com")
     if (!host) return
@@ -123,6 +184,12 @@ export function SettingsLayout() {
   const handleWipe = () => {
     if (window.confirm("VAROVÁNÍ: Opravdu chcete smazat VŠECHNY uložené pozice a žádosti? Tato akce je nevratná!")) {
       wipeDbMutation.mutate()
+    }
+  }
+
+  const handleResetOnboarding = () => {
+    if (window.confirm("Opravdu chcete resetovat profil a nastavení a projít úvodním onboardingem znovu?")) {
+      resetOnboardingMutation.mutate()
     }
   }
 
@@ -186,6 +253,13 @@ export function SettingsLayout() {
               >
                 {activeTab === "profile" && (
                   <div className="space-y-6">
+                    <div className="p-4 rounded-xl border border-primary/20 bg-primary/5 text-sm text-muted-foreground flex items-start gap-3">
+                      <HelpCircle className="w-5 h-5 text-primary shrink-0 mt-0.5" />
+                      <p>
+                        Informace z vašeho profilu a životopisu slouží AI jako podklad pro výpočet <strong>AI Hodnocení (Match score)</strong> a pro personalizaci motivačních e-mailů.
+                      </p>
+                    </div>
+
                     <div className="grid grid-cols-2 gap-6">
                       <div className="space-y-2">
                         <label className={labelClass}>Celé jméno</label>
@@ -212,7 +286,7 @@ export function SettingsLayout() {
                           </div>
                           <div>
                             <h4 className="text-sm font-semibold">Životopis (CV PDF)</h4>
-                            <p className="text-xs text-muted-foreground">Aktuální soubor pro generování motivačních dopisů</p>
+                            <p className="text-xs text-muted-foreground">Aktuální soubor pro porovnání s inzeráty a generování dopisů</p>
                           </div>
                         </div>
                         <label className="cursor-pointer">
@@ -234,8 +308,17 @@ export function SettingsLayout() {
                         </label>
                       </div>
                       <div className="flex items-center gap-2 text-xs font-mono bg-black/10 dark:bg-white/10 p-2.5 rounded-lg truncate">
-                        <CheckCircle2 className="w-4 h-4 text-green-500 shrink-0" />
-                        <span className="truncate">{settings.cv_file_path || "Není nahráno žádné PDF"}</span>
+                        {settings.cv_file_path ? (
+                          <>
+                            <CheckCircle2 className="w-4 h-4 text-green-500 shrink-0" />
+                            <span className="truncate">{settings.cv_file_path}</span>
+                          </>
+                        ) : (
+                          <>
+                            <AlertTriangle className="w-4 h-4 text-amber-500 shrink-0" />
+                            <span className="text-amber-600 dark:text-amber-400 font-sans">Není nahráno žádné CV v PDF. Nahrajte svůj životopis pro přesné AI hodnocení.</span>
+                          </>
+                        )}
                       </div>
                     </div>
                   </div>
@@ -247,9 +330,9 @@ export function SettingsLayout() {
                     <div className="space-y-2">
                       <label className={labelClass}>Poskytovatel AI</label>
                       <select name="llm_provider" defaultValue={settings.llm_provider || "Google Gemini"} className={selectClass}>
-                        <option value="Google Gemini">Google Gemini</option>
-                        <option value="OpenAI">OpenAI</option>
-                        <option value="Anthropic">Anthropic</option>
+                        <option value="Google Gemini">Google Gemini (Doporučeno - zdarma)</option>
+                        <option value="OpenAI">OpenAI (ChatGPT)</option>
+                        <option value="Anthropic">Anthropic (Claude)</option>
                         <option value="Ollama">Ollama (Lokální)</option>
                       </select>
                     </div>
@@ -258,10 +341,50 @@ export function SettingsLayout() {
                       <Input name="llm_model" defaultValue={settings.llm_model || "gemini-1.5-flash"} className="bg-white dark:bg-black" />
                     </div>
                     <div className="space-y-2">
-                      <label className={labelClass}>API Klíč</label>
-                      <Input name="llm_api_key" type="password" defaultValue={settings.llm_api_key || ""} placeholder="sk-..." className="bg-white dark:bg-black font-mono text-sm" />
+                      <div className="flex items-center justify-between">
+                        <label className={labelClass}>API Klíč</label>
+                        <a 
+                          href="https://aistudio.google.com/app/apikey" 
+                          target="_blank" 
+                          rel="noopener noreferrer"
+                          className="text-xs text-primary hover:underline inline-flex items-center gap-1 font-medium"
+                        >
+                          <span>Získat Gemini API klíč zdarma</span>
+                          <ExternalLink className="w-3 h-3" />
+                        </a>
+                      </div>
+                      <Input 
+                        name="llm_api_key" 
+                        type="password" 
+                        defaultValue={settings.llm_api_key || ""} 
+                        placeholder="Např. AIzaSy..." 
+                        className="bg-white dark:bg-black font-mono text-sm" 
+                      />
+                      <div className="border-l-4 border-amber-500 bg-amber-50/50 dark:bg-amber-900/20 p-3 rounded-r-lg text-xs space-y-1">
+                        <p className="font-semibold text-amber-900 dark:text-amber-200">
+                          📌 Důležité pro Google Gemini:
+                        </p>
+                        <p className="text-amber-800 dark:text-amber-300">
+                          Zadejte skutečný <strong>API klíč</strong> (začíná na <code>AIzaSy...</code>) vygenerovaný na Google AI Studio. 
+                          Nezadávejte ID projektu z Google Cloud (např. <code>gen-lang-client-...</code>).
+                        </p>
+                      </div>
                     </div>
-                    <div className="space-y-2">
+
+                    <div className="pt-2">
+                      <Button 
+                        type="button" 
+                        variant="secondary" 
+                        onClick={handleTestLlm} 
+                        disabled={testLlmMutation.isPending}
+                        className="gap-2"
+                      >
+                        {testLlmMutation.isPending ? <Loader2 className="w-4 h-4 animate-spin" /> : <Sparkles className="w-4 h-4 text-primary" />}
+                        Otestovat AI připojení
+                      </Button>
+                    </div>
+
+                    <div className="space-y-2 pt-4 border-t border-border">
                       <label className={labelClass}>Tón komunikace</label>
                       <select name="tone_of_voice" defaultValue={settings.tone_of_voice || "formal"} className={selectClass}>
                         <option value="formal">Korporátní formální (Dobrý den, vážení...)</option>
@@ -335,10 +458,19 @@ export function SettingsLayout() {
                         <AlertTriangle className="w-5 h-5" />
                         Nebezpečná zóna (Danger Zone)
                       </h3>
-                      <p className="text-sm text-muted-foreground">Tato akce trvale vymaže všechny sledované pozice a historii žádostí. Nastavení zůstane zachováno.</p>
-                      <Button type="button" variant="destructive" onClick={handleWipe} disabled={wipeDbMutation.isPending}>
-                        Smazat celou historii žádostí
-                      </Button>
+                      <div className="space-y-2">
+                        <p className="text-sm text-muted-foreground">Vymaže všechny sledované pozice a historii žádostí. Nastavení zůstane zachováno.</p>
+                        <Button type="button" variant="destructive" onClick={handleWipe} disabled={wipeDbMutation.isPending}>
+                          Smazat celou historii žádostí
+                        </Button>
+                      </div>
+
+                      <div className="pt-4 border-t border-red-100 dark:border-red-900/20 space-y-2">
+                        <p className="text-sm text-muted-foreground">Resetuje váš profil, životopis a nastavení a znovu spustí úvodního průvodce (Onboarding).</p>
+                        <Button type="button" variant="outline" className="border-red-300 text-red-600 hover:bg-red-50 dark:border-red-800 dark:text-red-400" onClick={handleResetOnboarding} disabled={resetOnboardingMutation.isPending}>
+                          Resetovat profil a projít onboardingem znovu
+                        </Button>
+                      </div>
                     </div>
                   </div>
                 )}

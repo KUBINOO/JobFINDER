@@ -16,11 +16,17 @@ const API_BASE = "http://localhost:8000/api"
 
 export function DashboardLayout() {
   const [activeTab, setActiveTab] = useState<"search" | "history" | "settings">("search")
+  const [settingsTab, setSettingsTab] = useState<string>("profile")
   const [viewMode, setViewMode] = useState<"master-detail" | "pipeline">("master-detail")
   const [selectedJobId, setSelectedJobId] = useState<string | null>(null)
   
   const { theme, setTheme } = useTheme()
   const queryClient = useQueryClient()
+
+  const handleOpenSettings = (tab: string = "profile") => {
+    setSettingsTab(tab)
+    setActiveTab("settings")
+  }
 
   // Fetch jobs
   const { data: jobs = [], isLoading } = useQuery<Job[]>({
@@ -101,7 +107,7 @@ export function DashboardLayout() {
       {/* ZBYTEK OBRAZOVKY S PŘEPÍNAČEM */}
       <div className="flex-1 flex flex-col">
         {activeTab === "settings" ? (
-          <SettingsLayout />
+          <SettingsLayout initialTab={settingsTab} />
         ) : (
           <>
             {/* Top-level Navigation / Tabs */}
@@ -171,7 +177,11 @@ export function DashboardLayout() {
 
               {/* PRAVÝ PANEL (Detail) */}
               <div className="flex-1 flex flex-col bg-white/10 dark:bg-black/10 relative">
-                <DetailPanel job={selectedJob} onStatusChange={handleStatusChange} />
+                <DetailPanel 
+                  job={selectedJob} 
+                  onStatusChange={handleStatusChange} 
+                  onOpenSettings={handleOpenSettings}
+                />
               </div>
             </>
           ) : (
