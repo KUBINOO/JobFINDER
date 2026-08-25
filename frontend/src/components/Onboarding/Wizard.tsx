@@ -8,6 +8,7 @@ import { UploadCloud, ChevronRight, ChevronLeft } from "lucide-react"
 import { apiClient } from "../../api/client"
 
 import { useQueryClient } from "@tanstack/react-query"
+import { AI_PROVIDERS, AI_MODELS, getDefaultModelForProvider } from "../../constants/aiModels"
 
 // Konstanty s kroky wizardu v češtině
 const STEPS = ["Základní údaje", "Dokumenty", "Motor aplikace"]
@@ -25,7 +26,7 @@ export function OnboardingWizard({ onComplete }: { onComplete: () => void }) {
     industry: "",
     linkedin_url: "",
     provider: "Google Gemini",
-    model: "gemini-1.5-flash",
+    model: "gemini-3.7-flash",
     api_key: "",
     ollama_host: "",
     smtp_email: "",
@@ -90,7 +91,7 @@ export function OnboardingWizard({ onComplete }: { onComplete: () => void }) {
         industry: "IT / Software",
         linkedin_url: "https://linkedin.com/in/devtest",
         llm_provider: "Google Gemini",
-        llm_model: "gemini-1.5-flash",
+        llm_model: "gemini-3.7-flash",
         llm_api_key: null,
         ollama_host: null,
         smtp_email: "dev@test.local",
@@ -313,23 +314,18 @@ function Step2Docs({ formData, setFormData, cvFile, setCvFile }: any) {
 }
 
 function Step3API({ formData, setFormData }: any) {
-  const models: Record<string, string[]> = {
-    "Google Gemini": ["gemini-1.5-flash", "gemini-1.5-pro", "gemini-2.0-flash", "gemini-flash-latest"],
-    "OpenAI": ["gpt-4o", "gpt-4o-mini"],
-    "Anthropic": ["claude-3-5-sonnet", "claude-3-opus"],
-    "Groq": ["llama-3.1-70b-versatile", "mixtral-8x7b-32768"],
-    "Ollama (Local)": ["llama3", "mistral"]
-  }
-  
-  const currentModels = models[formData.provider] || []
-  const isOllama = formData.provider === "Ollama (Local)"
+  const currentProviderConfig = AI_PROVIDERS.find((p) => p.name === formData.provider) || AI_PROVIDERS[0]
+  const providerModels = AI_MODELS[formData.provider] || []
+  const categories = Array.from(new Set(providerModels.map((m) => m.category)))
+  const isOllama = currentProviderConfig.isLocal
 
   const handleProviderChange = (e: React.ChangeEvent<HTMLSelectElement>) => {
     const newProvider = e.target.value
+    const defModel = getDefaultModelForProvider(newProvider)
     setFormData({
       ...formData,
       provider: newProvider,
-      model: models[newProvider][0]
+      model: defModel
     })
   }
 
@@ -350,40 +346,31 @@ function Step3API({ formData, setFormData }: any) {
                 onChange={handleProviderChange}
                 className="flex h-11 w-full rounded-xl border border-input/50 bg-white/40 dark:bg-black/20 backdrop-blur-sm px-3 py-2 text-sm ring-offset-background focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 transition-all appearance-none"
               >
-                {Object.keys(models).map((p) => (
-                  <option key={p} value={p} className="bg-background text-foreground">{p}</option>
+                {AI_PROVIDERS.map((p) => (
+                  <option key={p.name} value={p.name} className="bg-background text-foreground">{p.label}</option>
                 ))}
               </select>
             </div>
             
             <div className="space-y-2">
               <label className="text-sm font-medium">Model</label>
-              {isOllama ? (
-                <>
-                  <Input 
-                    value={formData.model}
-                    onChange={(e) => setFormData({...formData, model: e.target.value})}
-                    list="ollama-models" 
-                    placeholder="Vyberte nebo napište model"
-                    className="h-11 bg-white/40 dark:bg-black/20"
-                  />
-                  <datalist id="ollama-models">
-                    {currentModels.map((m) => (
-                      <option key={m} value={m} />
-                    ))}
-                  </datalist>
-                </>
-              ) : (
-                <select 
-                  value={formData.model}
-                  onChange={(e) => setFormData({...formData, model: e.target.value})}
-                  className="flex h-11 w-full rounded-xl border border-input/50 bg-white/40 dark:bg-black/20 backdrop-blur-sm px-3 py-2 text-sm ring-offset-background focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 transition-all appearance-none"
-                >
-                  {currentModels.map((m) => (
-                    <option key={m} value={m} className="bg-background text-foreground">{m}</option>
-                  ))}
-                </select>
-              )}
+              <select 
+                value={formData.model}
+                onChange={(e) => setFormData({...formData, model: e.target.value})}
+                className="flex h-11 w-full rounded-xl border border-input/50 bg-white/40 dark:bg-black/20 backdrop-blur-sm px-3 py-2 text-sm ring-offset-background focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 transition-all appearance-none"
+              >
+                {categories.map((cat) => (
+                  <optgroup key={cat} label={cat} className="bg-background text-foreground font-semibold">
+                    {providerModels
+                      .filter((m) => m.category === cat)
+                      .map((m) => (
+                        <option key={m.id} value={m.id} className="bg-background text-foreground font-normal">
+                          {m.name} {m.badge ? `[${m.badge}]` : ""} ({m.id})
+                        </option>
+                      ))}
+                  </optgroup>
+                ))}
+              </select>
             </div>
           </div>
 
@@ -393,7 +380,7 @@ function Step3API({ formData, setFormData }: any) {
                 <label className="text-sm font-medium">Ollama Host URL</label>
                 <Input 
                   type="text" 
-                  value={formData.ollama_host}
+                  value={formData.ollama_host || "http://localhost:11434"} 
                   onChange={(e) => setFormData({...formData, ollama_host: e.target.value})}
                   placeholder="http://localhost:11434" 
                   className="h-11 bg-white/40 dark:bg-black/20" 
@@ -401,14 +388,31 @@ function Step3API({ formData, setFormData }: any) {
               </>
             ) : (
               <>
-                <label className="text-sm font-medium">API Klíč {formData.provider}</label>
+                <div className="flex items-center justify-between">
+                  <label className="text-sm font-medium">API Klíč ({formData.provider})</label>
+                  {currentProviderConfig.apiKeyHelpUrl && (
+                    <a 
+                      href={currentProviderConfig.apiKeyHelpUrl} 
+                      target="_blank" 
+                      rel="noopener noreferrer"
+                      className="text-xs text-primary hover:underline"
+                    >
+                      {currentProviderConfig.apiKeyHelpLabel || "Získat klíč"}
+                    </a>
+                  )}
+                </div>
                 <Input 
                   type="password" 
                   value={formData.api_key}
                   onChange={(e) => setFormData({...formData, api_key: e.target.value})}
-                  placeholder="sk-..." 
-                  className="h-11 bg-white/40 dark:bg-black/20" 
+                  placeholder={currentProviderConfig.apiKeyPlaceholder} 
+                  className="h-11 bg-white/40 dark:bg-black/20 font-mono text-sm" 
                 />
+                {currentProviderConfig.apiKeyNote && (
+                  <p className="text-xs text-amber-600 dark:text-amber-400">
+                    {currentProviderConfig.apiKeyNote}
+                  </p>
+                )}
               </>
             )}
           </div>

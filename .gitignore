@@ -18,6 +18,8 @@ env/
 
 # Databases
 *.db
+*.db-shm
+*.db-wal
 *.sqlite3
 app.db
 backend/app.db

@@ -1,7 +1,8 @@
 import React, { useState } from "react"
 import { JobCard, Job, JobStatus } from "./JobCard"
 import { ScrollArea } from "../ui/scroll-area"
-import { Search, History, Settings, Briefcase, LayoutDashboard, ListTodo, Sun, Moon } from "lucide-react"
+import { Search, History, Settings, Briefcase, LayoutDashboard, ListTodo, Sun, Moon, Sparkles, Loader2 } from "lucide-react"
+import { Button } from "../ui/button"
 import { cn } from "../../lib/utils"
 import { DetailPanel } from "./DetailPanel"
 import { PipelineBoard } from "./PipelineBoard"
@@ -28,14 +29,18 @@ export function DashboardLayout() {
     setActiveTab("settings")
   }
 
-  // Fetch jobs
+  // Fetch jobs with smart polling (only polls when a background job is in progress)
   const { data: jobs = [], isLoading } = useQuery<Job[]>({
     queryKey: ["jobs"],
     queryFn: async () => {
       const res = await axios.get(`${API_BASE}/applications`)
       return res.data
     },
-    refetchInterval: 3000, // Poll every 3 seconds for live updates
+    refetchInterval: (query) => {
+      const data = query.state.data as Job[] | undefined
+      const hasActiveJobs = data?.some((j) => ["Pending", "Scraping", "Generating", "Sending"].includes(j.status))
+      return hasActiveJobs ? 2000 : false
+    },
   })
 
   // Set selected job on initial load if none selected
@@ -43,7 +48,7 @@ export function DashboardLayout() {
     if (!selectedJobId && jobs.length > 0) {
       setSelectedJobId(jobs[0].id)
     }
-  }, [jobs, selectedJobId])
+  }, [jobs.length, selectedJobId])
 
   const selectedJob = jobs.find((j) => j.id === selectedJobId) || null
 
@@ -72,6 +77,24 @@ export function DashboardLayout() {
       if (selectedJobId) {
         setSelectedJobId(null)
       }
+    }
+  })
+
+  const matchAllMutation = useMutation({
+    mutationFn: async () => {
+      const res = await axios.post(`${API_BASE}/applications/match-all`)
+      return res.data
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["jobs"] })
+      // Opakované dotazy pro zachycení výsledků background tasků
+      setTimeout(() => queryClient.invalidateQueries({ queryKey: ["jobs"] }), 3000)
+      setTimeout(() => queryClient.invalidateQueries({ queryKey: ["jobs"] }), 6000)
+      setTimeout(() => queryClient.invalidateQueries({ queryKey: ["jobs"] }), 10000)
+    },
+    onError: (err: any) => {
+      const detail = err.response?.data?.detail
+      alert("Chyba při spuštění hromadné AI analýzy: " + (detail || err.message))
     }
   })
 
@@ -173,6 +196,29 @@ export function DashboardLayout() {
                     )}
                   </div>
                 </ScrollArea>
+
+                {/* STICKY TLAČÍTKO PRO HROMADNÝ MATCHING */}
+                {jobs.length > 0 && (
+                  <div className="p-3 border-t border-white/20 dark:border-white/10 bg-white/40 dark:bg-black/40 backdrop-blur-xl z-20 shrink-0">
+                    <Button
+                      onClick={() => matchAllMutation.mutate()}
+                      disabled={matchAllMutation.isPending || isLoading}
+                      className="w-full h-11 rounded-xl font-semibold gap-2 shadow-md bg-gradient-to-r from-primary to-primary/80 hover:from-primary/90 hover:to-primary text-primary-foreground hover:shadow-primary/20 hover:scale-[1.01] transition-all text-xs"
+                    >
+                      {matchAllMutation.isPending ? (
+                        <>
+                          <Loader2 className="w-4 h-4 animate-spin" />
+                          <span>Vyhodnocuji všechny pozice...</span>
+                        </>
+                      ) : (
+                        <>
+                          <Sparkles className="w-4 h-4" />
+                          <span>Spočítat AI shodu pro všechny ({jobs.length})</span>
+                        </>
+                      )}
+                    </Button>
+                  </div>
+                )}
               </div>
 
               {/* PRAVÝ PANEL (Detail) */}

@@ -47,7 +47,7 @@ async def upload_cv(file: UploadFile = File(...), session: Session = Depends(get
         user_prefs = UserPreferences(
             id=1,
             llm_provider="Google Gemini",
-            llm_model="gemini-1.5-flash",
+            llm_model="gemini-3.7-flash",
             smtp_email="",
             smtp_password="",
             smtp_port=587,

@@ -63,8 +63,7 @@ export function DetailPanel({ job, onStatusChange, onOpenSettings }: DetailPanel
   const hasProfile = Boolean(settings?.full_name || settings?.industry || settings?.education)
   const isOllama = settings?.llm_provider === "Ollama"
   const rawKey = settings?.llm_api_key?.trim() || ""
-  const isKeyProjectFormat = rawKey.startsWith("gen-lang-client")
-  const hasApiKey = isOllama ? true : Boolean(rawKey && !isKeyProjectFormat)
+  const hasApiKey = isOllama ? true : Boolean(rawKey)
   const isMissingCv = !hasCv && !hasProfile
   const isMissingKey = !hasApiKey
   const hasValidConfig = !isMissingCv && !isMissingKey
@@ -74,9 +73,29 @@ export function DetailPanel({ job, onStatusChange, onOpenSettings }: DetailPanel
     if (job) {
       setEmailSubject(job.generated_subject || `Zájem o pozici: ${job.title}`)
       setEmailBody(job.generated_body || "")
-      setRecipientEmail("")
     }
-  }, [job?.id, job?.generated_body, job?.generated_subject, job?.title])
+  }, [job?.id, job?.generated_body, job?.generated_subject])
+
+  useEffect(() => {
+    setRecipientEmail("")
+  }, [job?.id])
+
+  // Mutace pro samostatné vyhodnocení AI shody (Match score)
+  const matchMutation = useMutation({
+    mutationFn: async (jobId: string) => {
+      const res = await axios.post(`${API_BASE}/applications/${jobId}/match`)
+      return res.data
+    },
+    onSuccess: () => {
+      // Okamžitě znovu načti data a pak po 2s znovu (aby se zachytil výsledek background tasku)
+      queryClient.invalidateQueries({ queryKey: ["jobs"] })
+      setTimeout(() => queryClient.invalidateQueries({ queryKey: ["jobs"] }), 2000)
+      setTimeout(() => queryClient.invalidateQueries({ queryKey: ["jobs"] }), 5000)
+    },
+    onError: (err: any) => {
+      alert("Chyba při vyhodnocování AI shody: " + (err.response?.data?.detail || err.message))
+    }
+  })
 
   // Mutace pro AI generování motivačního e-mailu na vyžádání
   const generateMutation = useMutation({
@@ -124,17 +143,13 @@ export function DetailPanel({ job, onStatusChange, onOpenSettings }: DetailPanel
     )
   }
 
+  const isMatching = matchMutation.isPending
   const isGenerating = job.status === "Generating" || generateMutation.isPending
   const isSending = job.status === "Sending" || sendEmailMutation.isPending
   const hasGeneratedEmail = Boolean(job.generated_body || emailBody)
   const isSent = job.status === "Sent"
 
-  const getScoreColor = (score?: number) => {
-    if (score === undefined) return "text-muted-foreground"
-    if (score >= 80) return "text-green-600 dark:text-green-400"
-    if (score >= 50) return "text-yellow-600 dark:text-yellow-400"
-    return "text-red-600 dark:text-red-400"
-  }
+  const hasScore = typeof job.match_score === "number" && job.match_score !== null
 
   // Získání a ověření URL adresy zdroje inzerátu
   let sourceUrl = job.url || job.source_url || ""
@@ -253,12 +268,10 @@ export function DetailPanel({ job, onStatusChange, onOpenSettings }: DetailPanel
                   <Key className="w-5 h-5 text-red-600 dark:text-red-400 shrink-0 mt-0.5" />
                   <div>
                     <h4 className="font-semibold text-red-950 dark:text-red-100">
-                      {isKeyProjectFormat ? "Neplatný formát API klíče Gemini" : "Chybí API klíč pro AI"}
+                      Chybí API klíč{settings?.llm_provider ? ` pro ${settings.llm_provider}` : " pro AI"}
                     </h4>
                     <p className="text-xs text-red-800/90 dark:text-red-300/90 mt-0.5">
-                      {isKeyProjectFormat 
-                        ? "V nastavení je zadáno ID projektu Google Cloud ('gen-lang-client...') místo platného API klíče. Získejte správný klíč zdarma na Google AI Studio (začíná na AIzaSy...)."
-                        : "Pro spuštění AI hodnocení a generování e-mailů je potřeba nastavit platný API klíč v Nastavení."}
+                      Pro spuštění AI hodnocení a generování e-mailů je potřeba nastavit platný API klíč{settings?.llm_provider ? ` pro ${settings.llm_provider}` : ""} v Nastavení → AI a Chování.
                     </p>
                   </div>
                 </div>
@@ -276,47 +289,108 @@ export function DetailPanel({ job, onStatusChange, onOpenSettings }: DetailPanel
               </div>
             )}
 
-            {/* AI Hodnocení (Match Score) pokud existuje */}
-            {job.match_score !== undefined ? (
-              <div className="mt-6 p-4 rounded-xl border border-white/20 bg-white/40 dark:bg-black/20 flex items-start gap-4 shadow-sm">
-                <div className={cn("text-3xl font-bold pt-1", getScoreColor(job.match_score))}>
-                  {job.match_score}%
+            {/* AI Hodnocení (Match Score) */}
+            {hasScore ? (
+              <div className="mt-6 p-5 rounded-2xl border border-white/20 bg-white/60 dark:bg-black/30 backdrop-blur-md shadow-sm space-y-3">
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center gap-3">
+                    <div className={cn(
+                      "flex items-center justify-center w-14 h-14 rounded-2xl font-black text-2xl border shadow-inner",
+                      job.match_score! >= 80 
+                        ? "bg-green-500/15 border-green-500/30 text-green-600 dark:text-green-400"
+                        : job.match_score! >= 50
+                        ? "bg-amber-500/15 border-amber-500/30 text-amber-600 dark:text-amber-400"
+                        : "bg-red-500/15 border-red-500/30 text-red-600 dark:text-red-400"
+                    )}>
+                      {job.match_score}%
+                    </div>
+                    <div>
+                      <div className="flex items-center gap-2">
+                        <h4 className="font-bold text-sm text-foreground">AI Hodnocení shody s vaším profilem</h4>
+                        <span className={cn(
+                          "text-[11px] px-2 py-0.5 rounded-full font-semibold border",
+                          job.match_score! >= 80 
+                            ? "bg-green-500/10 border-green-500/20 text-green-700 dark:text-green-300"
+                            : job.match_score! >= 50
+                            ? "bg-amber-500/10 border-amber-500/20 text-amber-700 dark:text-amber-300"
+                            : "bg-red-500/10 border-red-500/20 text-red-700 dark:text-red-300"
+                        )}>
+                          {job.match_score! >= 80 ? "Vynikající shoda" : job.match_score! >= 50 ? "Dobrá shoda" : "Nízká shoda"}
+                        </span>
+                      </div>
+                      <p className="text-xs text-muted-foreground mt-0.5">
+                        Kriticky porovnáno s vaším nahraným životopisem a zkušenostmi
+                      </p>
+                    </div>
+                  </div>
+
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    disabled={isMatching}
+                    onClick={() => matchMutation.mutate(job.id)}
+                    className="h-8 gap-1.5 text-xs text-muted-foreground hover:text-primary"
+                  >
+                    {isMatching ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <RefreshCw className="w-3.5 h-3.5" />}
+                    {isMatching ? "Počítám..." : "Přepočítat shodu"}
+                  </Button>
                 </div>
-                <div>
-                  <h4 className="font-semibold text-sm">AI Hodnocení shody s vaším profilem</h4>
-                  <p className="text-muted-foreground mt-1 text-sm">{job.match_reason}</p>
-                </div>
+
+                {job.match_reason && (
+                  <div className="p-3 rounded-xl bg-black/5 dark:bg-white/5 border border-black/5 dark:border-white/5 text-sm text-foreground leading-relaxed">
+                    <p className="font-semibold text-xs text-muted-foreground uppercase tracking-wider mb-1">
+                      Zdůvodnění AI:
+                    </p>
+                    {job.match_reason}
+                  </div>
+                )}
               </div>
             ) : (
               /* Informační box, pokud shoda ještě nebyla spočítána */
-              <div className="mt-6 p-4 rounded-xl border border-white/10 bg-white/20 dark:bg-black/10 flex items-start justify-between gap-4 text-xs text-muted-foreground shadow-sm">
+              <div className="mt-6 p-5 rounded-2xl border border-dashed border-primary/25 bg-primary/5 flex items-center justify-between gap-4">
                 <div className="flex items-start gap-3">
-                  <Sparkles className="w-4 h-4 text-primary shrink-0 mt-0.5" />
+                  <div className="w-10 h-10 rounded-xl bg-primary/10 flex items-center justify-center text-primary shrink-0 mt-0.5">
+                    <Sparkles className="w-5 h-5" />
+                  </div>
                   <div>
-                    <span className="font-semibold text-foreground text-sm block mb-0.5">AI Hodnocení shody (Match Score)</span>
-                    <p>
+                    <h4 className="font-bold text-sm text-foreground">AI Hodnocení shody zatím nebylo provedeno</h4>
+                    <p className="text-xs text-muted-foreground mt-0.5 leading-relaxed">
                       {hasValidConfig 
-                        ? "Pro tuto pozici zatím nebyla provedena AI analýza. Klikněte níže na „Vygenerovat e-mail pomocí AI“ pro výpočet shody a argumentů."
-                        : "Pro výpočet AI shody a doporučení je potřeba mít nahraný životopis a platný API klíč v Nastavení."}
+                        ? "Kliknutím na tlačítko můžete okamžitě spustit samostatnou AI analýzu této pozice a zjistit přesné procento shody."
+                        : isMissingKey
+                        ? "Pro výpočet AI shody musíte nejprve nastavit platný API klíč v Nastavení."
+                        : "Pro výpočet AI shody je nutné nahrát životopis nebo vyplnit profil v Nastavení."}
                     </p>
                   </div>
                 </div>
-                {!hasValidConfig && onOpenSettings && (
-                  <Button 
-                    size="sm" 
-                    variant="ghost" 
-                    onClick={() => onOpenSettings(isMissingCv ? "profile" : "ai")}
-                    className="shrink-0 text-xs font-medium text-primary hover:bg-primary/10 gap-1"
+
+                {hasValidConfig ? (
+                  <Button
+                    size="sm"
+                    disabled={isMatching}
+                    onClick={() => matchMutation.mutate(job.id)}
+                    className="shrink-0 gap-1.5 rounded-xl font-semibold shadow-sm"
                   >
-                    <Settings className="w-3.5 h-3.5" />
-                    Nastavení
+                    {isMatching ? <Loader2 className="w-4 h-4 animate-spin" /> : <Sparkles className="w-4 h-4" />}
+                    {isMatching ? "Počítám shodu..." : "Spočítat AI shodu"}
                   </Button>
+                ) : (
+                  onOpenSettings && (
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      onClick={() => onOpenSettings(isMissingCv ? "profile" : "ai")}
+                      className="shrink-0 text-xs font-semibold rounded-xl"
+                    >
+                      {isMissingCv ? "Nahrát CV" : "Nastavit klíč"}
+                    </Button>
+                  )
                 )}
               </div>
             )}
 
-            {/* Chybová hláška */}
-            {job.status === "Failed" && job.error_logs && (
+            {/* Chybová hláška (zobrazí se vždy když je error_logs přítomný, nejen u Failed) */}
+            {job.error_logs && (
               <div className="mt-6 p-4 rounded-xl border border-red-500/30 bg-red-500/10 text-red-700 dark:text-red-300 text-sm flex flex-col gap-2">
                 <div className="flex items-center justify-between">
                   <div className="flex items-center gap-2">
@@ -466,7 +540,7 @@ export function DetailPanel({ job, onStatusChange, onOpenSettings }: DetailPanel
                         )}
                         {isMissingKey && (
                           <div className="flex items-center justify-between bg-white/50 dark:bg-black/40 p-2 rounded-lg">
-                            <span className="text-muted-foreground">🔑 Platný AI API klíč (Gemini)</span>
+                            <span className="text-muted-foreground">🔑 Platný AI API klíč ({settings?.llm_provider || "AI"})</span>
                             {onOpenSettings && (
                               <Button 
                                 size="sm" 

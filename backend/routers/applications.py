@@ -4,7 +4,13 @@ from typing import List, Optional
 from pydantic import BaseModel
 from database import get_session
 from models import Application, JobPosting, ApplicationStatus, User
-from orchestrator import process_job_application, generate_application_email, send_application_email
+from orchestrator import (
+    process_job_application, 
+    generate_application_email, 
+    send_application_email,
+    evaluate_single_match,
+    evaluate_all_matches
+)
 
 router = APIRouter(prefix="/api/applications", tags=["applications"])
 
@@ -182,6 +188,30 @@ def delete_application(app_id: int, session: Session = Depends(get_session)):
     session.delete(application)
     session.commit()
     return {"message": "Application deleted"}
+
+@router.post("/{app_id}/match")
+def match_single_application(app_id: int, background_tasks: BackgroundTasks, session: Session = Depends(get_session)):
+    application = session.get(Application, app_id)
+    if not application:
+        raise HTTPException(status_code=404, detail="Žádost nebyla nalezena")
+
+    application.status = ApplicationStatus.GENERATING
+    application.error_logs = None
+    session.add(application)
+    session.commit()
+    session.refresh(application)
+
+    background_tasks.add_task(evaluate_single_match, app_id)
+    return {"message": "Vyhodnocování AI shody bylo spuštěno.", "status": "Generating"}
+
+@router.post("/match-all")
+async def match_all_applications(background_tasks: BackgroundTasks, session: Session = Depends(get_session)):
+    applications = session.exec(select(Application)).all()
+    if not applications:
+        raise HTTPException(status_code=404, detail="Žádné pozice k vyhodnocení.")
+
+    background_tasks.add_task(evaluate_all_matches)
+    return {"message": f"Spuštěno hromadné vyhodnocování AI shody pro {len(applications)} pozic.", "count": len(applications)}
 
 @router.post("/{app_id}/generate")
 def generate_email_for_application(app_id: int, background_tasks: BackgroundTasks, session: Session = Depends(get_session)):

@@ -7,6 +7,7 @@ import { User, Cpu, Mail, Database, Save, Loader2, AlertTriangle, UploadCloud, F
 import { Input } from "../ui/input"
 import { Button } from "../ui/button"
 import { Textarea } from "../ui/textarea"
+import { AI_PROVIDERS, AI_MODELS, getDefaultModelForProvider } from "../../constants/aiModels"
 
 
 const API_BASE = "http://localhost:8000/api"
@@ -32,6 +33,28 @@ export function SettingsLayout({ initialTab = "profile" }: SettingsLayoutProps) 
       return res.data
     },
   })
+
+  const [selectedProvider, setSelectedProvider] = useState<string>("Google Gemini")
+  const [selectedModel, setSelectedModel] = useState<string>("gemini-3.7-flash")
+  const [customModelMode, setCustomModelMode] = useState<boolean>(false)
+
+  useEffect(() => {
+    if (settings) {
+      const prov = settings.llm_provider || "Google Gemini"
+      setSelectedProvider(prov)
+      let mod = settings.llm_model
+      if (!mod || mod === "gemini-1.5-flash") {
+        mod = getDefaultModelForProvider(prov)
+      }
+      setSelectedModel(mod)
+      const isKnown = AI_MODELS[prov]?.some((m) => m.id === mod)
+      if (!isKnown && mod) {
+        setCustomModelMode(true)
+      } else {
+        setCustomModelMode(false)
+      }
+    }
+  }, [settings])
 
   const updateMutation = useMutation({
     mutationFn: async (newSettings: any) => {
@@ -152,10 +175,13 @@ export function SettingsLayout({ initialTab = "profile" }: SettingsLayoutProps) 
     if (!form) return
     const formData = new FormData(form)
     
-    const provider = (formData.get("llm_provider") as string) || settings.llm_provider || "Google Gemini"
-    const model = (formData.get("llm_model") as string) || settings.llm_model || "gemini-1.5-flash"
-    const api_key = (formData.get("llm_api_key") as string) ?? settings.llm_api_key ?? ""
-    const ollama_host = (formData.get("ollama_host") as string) || settings.ollama_host || null
+    const provider = (formData.get("llm_provider") as string) || selectedProvider || "Google Gemini"
+    let model = (formData.get("llm_model") as string) || selectedModel || getDefaultModelForProvider(provider)
+    if (model === "gemini-1.5-flash") {
+      model = "gemini-3.7-flash"
+    }
+    const api_key = (formData.get("llm_api_key") as string) ?? settings?.llm_api_key ?? ""
+    const ollama_host = (formData.get("ollama_host") as string) || settings?.ollama_host || null
 
     if (provider !== "Ollama" && (!api_key || !api_key.trim())) {
       alert("Před testem prosím zadejte API klíč.")
@@ -325,79 +351,180 @@ export function SettingsLayout({ initialTab = "profile" }: SettingsLayoutProps) 
                 )}
 
 
-                {activeTab === "ai" && (
-                  <div className="space-y-6">
-                    <div className="space-y-2">
-                      <label className={labelClass}>Poskytovatel AI</label>
-                      <select name="llm_provider" defaultValue={settings.llm_provider || "Google Gemini"} className={selectClass}>
-                        <option value="Google Gemini">Google Gemini (Doporučeno - zdarma)</option>
-                        <option value="OpenAI">OpenAI (ChatGPT)</option>
-                        <option value="Anthropic">Anthropic (Claude)</option>
-                        <option value="Ollama">Ollama (Lokální)</option>
-                      </select>
-                    </div>
-                    <div className="space-y-2">
-                      <label className={labelClass}>Model</label>
-                      <Input name="llm_model" defaultValue={settings.llm_model || "gemini-1.5-flash"} className="bg-white dark:bg-black" />
-                    </div>
-                    <div className="space-y-2">
-                      <div className="flex items-center justify-between">
-                        <label className={labelClass}>API Klíč</label>
-                        <a 
-                          href="https://aistudio.google.com/app/apikey" 
-                          target="_blank" 
-                          rel="noopener noreferrer"
-                          className="text-xs text-primary hover:underline inline-flex items-center gap-1 font-medium"
+                {activeTab === "ai" && (() => {
+                  const currentProviderConfig = AI_PROVIDERS.find((p) => p.name === selectedProvider) || AI_PROVIDERS[0]
+                  const providerModels = AI_MODELS[selectedProvider] || []
+                  const categories = Array.from(new Set(providerModels.map((m) => m.category)))
+                  const activeModelObj = providerModels.find((m) => m.id === selectedModel)
+
+                  return (
+                    <div className="space-y-6">
+                      {/* POSKYTOVATEL AI */}
+                      <div className="space-y-2">
+                        <label className={labelClass}>Poskytovatel AI</label>
+                        <select 
+                          name="llm_provider" 
+                          value={selectedProvider} 
+                          onChange={(e) => {
+                            const newProv = e.target.value
+                            setSelectedProvider(newProv)
+                            const def = getDefaultModelForProvider(newProv)
+                            setSelectedModel(def)
+                            setCustomModelMode(false)
+                          }} 
+                          className={selectClass}
                         >
-                          <span>Získat Gemini API klíč zdarma</span>
-                          <ExternalLink className="w-3 h-3" />
-                        </a>
+                          {AI_PROVIDERS.map((prov) => (
+                            <option key={prov.name} value={prov.name}>
+                              {prov.label}
+                            </option>
+                          ))}
+                        </select>
                       </div>
-                      <Input 
-                        name="llm_api_key" 
-                        type="password" 
-                        defaultValue={settings.llm_api_key || ""} 
-                        placeholder="Např. AIzaSy..." 
-                        className="bg-white dark:bg-black font-mono text-sm" 
-                      />
-                      <div className="border-l-4 border-amber-500 bg-amber-50/50 dark:bg-amber-900/20 p-3 rounded-r-lg text-xs space-y-1">
-                        <p className="font-semibold text-amber-900 dark:text-amber-200">
-                          📌 Důležité pro Google Gemini:
-                        </p>
-                        <p className="text-amber-800 dark:text-amber-300">
-                          Zadejte skutečný <strong>API klíč</strong> (začíná na <code>AIzaSy...</code>) vygenerovaný na Google AI Studio. 
-                          Nezadávejte ID projektu z Google Cloud (např. <code>gen-lang-client-...</code>).
-                        </p>
+
+                      {/* VÝBĚR MODELU */}
+                      <div className="space-y-2">
+                        <div className="flex items-center justify-between">
+                          <label className={labelClass}>Model ({selectedProvider})</label>
+                          <button
+                            type="button"
+                            onClick={() => setCustomModelMode(!customModelMode)}
+                            className="text-xs text-primary hover:underline font-medium"
+                          >
+                            {customModelMode ? "← Zpět na seznam předvoleb" : "⚙️ Zadat vlastní ID modelu"}
+                          </button>
+                        </div>
+
+                        {customModelMode ? (
+                          <div className="space-y-1">
+                            <Input 
+                              name="llm_model" 
+                              value={selectedModel} 
+                              onChange={(e) => setSelectedModel(e.target.value)}
+                              placeholder="Např. gpt-5.6-sol nebo gemini-3.7-flash" 
+                              className="bg-white dark:bg-black font-mono text-sm" 
+                            />
+                            <p className="text-[11px] text-muted-foreground">
+                              Zadejte přesný identifikátor modelu podle oficiální dokumentace poskytovatele.
+                            </p>
+                          </div>
+                        ) : (
+                          <select 
+                            name="llm_model" 
+                            value={selectedModel} 
+                            onChange={(e) => {
+                              if (e.target.value === "__custom__") {
+                                setCustomModelMode(true)
+                              } else {
+                                setSelectedModel(e.target.value)
+                              }
+                            }} 
+                            className={selectClass}
+                          >
+                            {categories.map((cat) => (
+                              <optgroup key={cat} label={cat}>
+                                {providerModels
+                                  .filter((m) => m.category === cat)
+                                  .map((m) => (
+                                    <option key={m.id} value={m.id}>
+                                      {m.name} {m.badge ? `[${m.badge}]` : ""} ({m.id})
+                                    </option>
+                                  ))}
+                              </optgroup>
+                            ))}
+                            <option value="__custom__">⚙️ Jiný vlastní model...</option>
+                          </select>
+                        )}
+
+                        {activeModelObj && activeModelObj.description && !customModelMode && (
+                          <div className="text-xs text-muted-foreground bg-black/5 dark:bg-white/5 px-3 py-2 rounded-lg flex items-center gap-2">
+                            {activeModelObj.badge && (
+                              <span className="font-semibold text-primary">{activeModelObj.badge}:</span>
+                            )}
+                            <span>{activeModelObj.description}</span>
+                          </div>
+                        )}
+                      </div>
+
+                      {/* OLLAMA HOST (POKUD OLLAMA) */}
+                      {currentProviderConfig.isLocal ? (
+                        <div className="space-y-2">
+                          <label className={labelClass}>Ollama Host URL</label>
+                          <Input 
+                            name="ollama_host" 
+                            defaultValue={settings?.ollama_host || "http://localhost:11434"} 
+                            placeholder="http://localhost:11434" 
+                            className="bg-white dark:bg-black font-mono text-sm" 
+                          />
+                          <p className="text-[11px] text-muted-foreground">
+                            Ujistěte se, že Ollama běží lokálně na vašem počítači (<code>ollama serve</code>).
+                          </p>
+                        </div>
+                      ) : (
+                        /* API KLÍČ PRO CLOUD POSKYTOVATELE */
+                        <div className="space-y-2">
+                          <div className="flex items-center justify-between">
+                            <label className={labelClass}>API Klíč</label>
+                            {currentProviderConfig.apiKeyHelpUrl && (
+                              <a 
+                                href={currentProviderConfig.apiKeyHelpUrl} 
+                                target="_blank" 
+                                rel="noopener noreferrer"
+                                className="text-xs text-primary hover:underline inline-flex items-center gap-1 font-medium"
+                              >
+                                <span>{currentProviderConfig.apiKeyHelpLabel || "Získat API klíč"}</span>
+                                <ExternalLink className="w-3 h-3" />
+                              </a>
+                            )}
+                          </div>
+                          <Input 
+                            name="llm_api_key" 
+                            type="password" 
+                            defaultValue={settings?.llm_api_key || ""} 
+                            placeholder={currentProviderConfig.apiKeyPlaceholder} 
+                            className="bg-white dark:bg-black font-mono text-sm" 
+                          />
+                          {currentProviderConfig.apiKeyNote && (
+                            <div className="border-l-4 border-amber-500 bg-amber-50/50 dark:bg-amber-900/20 p-3 rounded-r-lg text-xs space-y-1">
+                              <p className="font-semibold text-amber-900 dark:text-amber-200">
+                                📌 Důležité pro {currentProviderConfig.name}:
+                              </p>
+                              <p className="text-amber-800 dark:text-amber-300">
+                                {currentProviderConfig.apiKeyNote}
+                              </p>
+                            </div>
+                          )}
+                        </div>
+                      )}
+
+                      <div className="pt-2">
+                        <Button 
+                          type="button" 
+                          variant="secondary" 
+                          onClick={handleTestLlm} 
+                          disabled={testLlmMutation.isPending}
+                          className="gap-2"
+                        >
+                          {testLlmMutation.isPending ? <Loader2 className="w-4 h-4 animate-spin" /> : <Sparkles className="w-4 h-4 text-primary" />}
+                          Otestovat AI připojení ({selectedProvider})
+                        </Button>
+                      </div>
+
+                      <div className="space-y-2 pt-4 border-t border-border">
+                        <label className={labelClass}>Tón komunikace</label>
+                        <select name="tone_of_voice" defaultValue={settings?.tone_of_voice || "formal"} className={selectClass}>
+                          <option value="formal">Korporátní formální (Dobrý den, vážení...)</option>
+                          <option value="startup">Moderní startupový (Ahoj, zaujala mě...)</option>
+                          <option value="creative">Kreativní a odvážný</option>
+                        </select>
+                      </div>
+                      <div className="space-y-2">
+                        <label className={labelClass}>Vlastní instrukce (Custom Prompt)</label>
+                        <Textarea name="custom_prompt" defaultValue={settings?.custom_prompt || ""} placeholder="Zde můžete připsat specifické požadavky na AI, např. 'Vždy zmiň můj projekt XYZ.'" className="h-32 bg-white dark:bg-black resize-none" />
                       </div>
                     </div>
-
-                    <div className="pt-2">
-                      <Button 
-                        type="button" 
-                        variant="secondary" 
-                        onClick={handleTestLlm} 
-                        disabled={testLlmMutation.isPending}
-                        className="gap-2"
-                      >
-                        {testLlmMutation.isPending ? <Loader2 className="w-4 h-4 animate-spin" /> : <Sparkles className="w-4 h-4 text-primary" />}
-                        Otestovat AI připojení
-                      </Button>
-                    </div>
-
-                    <div className="space-y-2 pt-4 border-t border-border">
-                      <label className={labelClass}>Tón komunikace</label>
-                      <select name="tone_of_voice" defaultValue={settings.tone_of_voice || "formal"} className={selectClass}>
-                        <option value="formal">Korporátní formální (Dobrý den, vážení...)</option>
-                        <option value="startup">Moderní startupový (Ahoj, zaujala mě...)</option>
-                        <option value="creative">Kreativní a odvážný</option>
-                      </select>
-                    </div>
-                    <div className="space-y-2">
-                      <label className={labelClass}>Vlastní instrukce (Custom Prompt)</label>
-                      <Textarea name="custom_prompt" defaultValue={settings.custom_prompt || ""} placeholder="Zde můžete připsat specifické požadavky na AI, např. 'Vždy zmiň můj projekt XYZ.'" className="h-32 bg-white dark:bg-black resize-none" />
-                    </div>
-                  </div>
-                )}
+                  )
+                })()}
 
                 {activeTab === "smtp" && (
                   <div className="space-y-6">

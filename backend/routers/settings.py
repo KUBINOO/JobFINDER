@@ -62,6 +62,12 @@ def get_settings(session: Session = Depends(get_session)):
     user_prefs = session.get(UserPreferences, 1)
     if not user_prefs:
         raise HTTPException(status_code=404, detail="Nastavení nenalezeno")
+    # Automatická migrace zastaralého gemini-1.5-flash na aktuální gemini-3.7-flash
+    if user_prefs.llm_model == "gemini-1.5-flash":
+        user_prefs.llm_model = "gemini-3.7-flash"
+        session.add(user_prefs)
+        session.commit()
+        session.refresh(user_prefs)
     return user_prefs
 
 @router.delete("/api/settings/reset")
@@ -102,7 +108,7 @@ async def test_smtp(req: SmtpTestRequest):
 
 class LlmTestRequest(BaseModel):
     provider: str = "Google Gemini"
-    model: str = "gemini-1.5-flash"
+    model: str = "gemini-3.7-flash"
     api_key: Optional[str] = None
     ollama_host: Optional[str] = None
 
@@ -110,29 +116,40 @@ class LlmTestRequest(BaseModel):
 async def test_llm(req: LlmTestRequest):
     from litellm import acompletion
     
-    model_name = req.model.strip() if req.model else "gemini-1.5-flash"
+    model_name = req.model.strip() if req.model else "gemini-3.7-flash"
+    if model_name == "gemini-1.5-flash":
+        model_name = "gemini-3.7-flash"
     api_key = req.api_key.strip() if req.api_key else ""
     
     if req.provider == "Google Gemini":
         if not api_key:
             raise HTTPException(
                 status_code=400, 
-                detail="Chybí API klíč pro Google Gemini. Zadejte platný API klíč z Google AI Studio (začíná na AIzaSy...)."
-            )
-        if api_key.startswith("gen-lang-client"):
-            raise HTTPException(
-                status_code=400, 
-                detail="Zadali jste Google Cloud Project ID ('gen-lang-client...'), nikoli Gemini API klíč. Získejte správný API klíč zdarma na https://aistudio.google.com/app/apikey (začíná na 'AIzaSy...')."
+                detail="Chybí API klíč pro Google Gemini. Zadejte platný API klíč z Google AI Studio."
             )
         if not model_name.startswith("gemini/"):
             model_name = f"gemini/{model_name}"
     elif req.provider == "OpenAI":
         if not api_key:
             raise HTTPException(status_code=400, detail="Chybí API klíč pro OpenAI (začíná na sk-...).")
+        if not (model_name.startswith("openai/") or model_name.startswith("gpt-") or model_name.startswith("o1") or model_name.startswith("o3") or model_name.startswith("chatgpt-")):
+            model_name = f"openai/{model_name}"
     elif req.provider == "Anthropic":
         if not api_key:
             raise HTTPException(status_code=400, detail="Chybí API klíč pro Anthropic (začíná na sk-ant-...).")
-    elif req.provider == "Ollama":
+        if not (model_name.startswith("anthropic/") or model_name.startswith("claude-")):
+            model_name = f"anthropic/{model_name}"
+    elif req.provider == "DeepSeek":
+        if not api_key:
+            raise HTTPException(status_code=400, detail="Chybí API klíč pro DeepSeek (začíná na sk-...).")
+        if not model_name.startswith("deepseek/"):
+            model_name = f"deepseek/{model_name}"
+    elif req.provider in ("Kimi / Moonshot AI", "Moonshot AI", "Kimi"):
+        if not api_key:
+            raise HTTPException(status_code=400, detail="Chybí API klíč pro Kimi / Moonshot AI.")
+        if not model_name.startswith("moonshot/"):
+            model_name = f"moonshot/{model_name}"
+    elif req.provider in ("Ollama", "Ollama (Lokální)", "Ollama (Local)"):
         if not model_name.startswith("ollama/"):
             model_name = f"ollama/{model_name}"
             
@@ -149,14 +166,14 @@ async def test_llm(req: LlmTestRequest):
             
         resp = await acompletion(**kwargs)
         content = resp.choices[0].message.content or "OK"
-        return {"message": f"Spojení s AI ({req.provider} - {req.model}) funguje bezchybně! (Odpověď modelu: {content.strip()})"}
+        return {"message": f"Spojení s AI ({req.provider} - {req.model}) funguje bezchybně! (Odpověď: {content.strip()})"}
     except Exception as e:
         err_str = str(e)
         if "API key not valid" in err_str or "API_KEY_INVALID" in err_str:
             raise HTTPException(
                 status_code=400, 
-                detail="Neplatný API klíč: Poskytovatel odmítl zadaný klíč. Ujistěte se, že používáte platný API klíč z Google AI Studio (začínající na AIzaSy...)."
+                detail="Neplatný API klíč: Poskytovatel odmítl zadaný klíč. Ujistěte se, že používáte platný API klíč pro danou službu."
             )
         if "AuthenticationError" in err_str:
             raise HTTPException(status_code=400, detail=f"Chyba autentizace AI: {err_str}")
-        raise HTTPException(status_code=400, detail=f"Chyba při komunikaci s AI: {err_str}")
+        raise HTTPException(status_code=400, detail=f"Chyba při komunikaci s AI ({model_name}): {err_str}")

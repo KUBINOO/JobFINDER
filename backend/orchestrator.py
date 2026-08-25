@@ -10,7 +10,7 @@ from database import engine
 from models import Application, ApplicationStatus, UserPreferences
 
 from factory import get_scraper
-from llm_service import CoverLetterGenerator
+from llm_service import CoverLetterGenerator, JobMatcher
 from email_service import AsyncEmailSender
 from utils.pdf_parser import extract_text_from_pdf
 
@@ -57,12 +57,9 @@ async def _run_scraping(session: Session, application: Application) -> None:
             "Inzerát neobsahuje čitelný popis pracovní pozice (pravděpodobně dynamický JavaScript nebo externí kariérní stránka)."
         )
 
-async def _run_llm_generation(session: Session, application: Application) -> None:
-    """Krok 2 a 3: Vygenerování e-mailu pomocí LLM a sestavení výsledného textu."""
+def _get_llm_setup(session: Session, application: Application):
+    """Získá kompletní profil uživatele (CV + formulář) a nakonfiguruje LLM model a klíč."""
     user = application.user
-    job = application.job_posting
-    
-    # Získání nastavení s profilem a životopisem
     user_prefs = session.get(UserPreferences, 1)
     
     cv_text = ""
@@ -91,7 +88,6 @@ async def _run_llm_generation(session: Session, application: Application) -> Non
                 except Exception as e:
                     logger.error(f"Nepodařilo se extrahovat text z nalezeného PDF ({latest_pdf}): {e}")
 
-    # Sestavení kompletního profilu uchazeče (kombinace CV a textových polí)
     profile_parts = []
     if user_prefs:
         if user_prefs.full_name: profile_parts.append(f"Jméno: {user_prefs.full_name}")
@@ -114,15 +110,15 @@ async def _run_llm_generation(session: Session, application: Application) -> Non
         raise ValueError("Chybí podklady pro AI: Nemáte nahraný životopis (PDF) ani vyplněný profil v Nastavení. Doplňte prosím své údaje, aby AI mohla vyhodnotit shodu s pozicí.")
 
     llm_provider = user_prefs.llm_provider if user_prefs else "Google Gemini"
-    llm_model = (user_prefs.llm_model if user_prefs and user_prefs.llm_model else "gemini-1.5-flash").strip()
+    llm_model = (user_prefs.llm_model if user_prefs and user_prefs.llm_model else "gemini-3.7-flash").strip()
+    if llm_model == "gemini-1.5-flash":
+        llm_model = "gemini-3.7-flash"
     api_key = (user_prefs.llm_api_key if user_prefs and user_prefs.llm_api_key else "").strip()
 
     # Validace a konfigurace poskytovatele LLM
     if llm_provider == "Google Gemini":
         if not api_key:
             raise ValueError("Chybí API klíč pro Google Gemini. Zadejte prosím svůj platný API klíč v Nastavení -> AI a Chování (klíč získáte zdarma na aistudio.google.com).")
-        if api_key.startswith("gen-lang-client"):
-            raise ValueError("Neplatný API klíč: Zadali jste Google Cloud Project ID ('gen-lang-client...') místo Gemini API klíče. Získejte správný klíč zdarma na https://aistudio.google.com/app/apikey (začíná na 'AIzaSy...').")
         if not llm_model.startswith("gemini/"):
             llm_model = f"gemini/{llm_model}"
         os.environ["GEMINI_API_KEY"] = api_key
@@ -131,13 +127,105 @@ async def _run_llm_generation(session: Session, application: Application) -> Non
         if not api_key:
             raise ValueError("Chybí API klíč pro OpenAI. Zadejte svůj API klíč (sk-...) v Nastavení -> AI a Chování.")
         os.environ["OPENAI_API_KEY"] = api_key
+        if not (llm_model.startswith("openai/") or llm_model.startswith("gpt-") or llm_model.startswith("o1") or llm_model.startswith("o3") or llm_model.startswith("chatgpt-")):
+            llm_model = f"openai/{llm_model}"
     elif llm_provider == "Anthropic":
         if not api_key:
             raise ValueError("Chybí API klíč pro Anthropic. Zadejte svůj API klíč (sk-ant-...) v Nastavení -> AI a Chování.")
         os.environ["ANTHROPIC_API_KEY"] = api_key
-    elif llm_provider == "Ollama":
+        if not (llm_model.startswith("anthropic/") or llm_model.startswith("claude-")):
+            llm_model = f"anthropic/{llm_model}"
+    elif llm_provider == "DeepSeek":
+        if not api_key:
+            raise ValueError("Chybí API klíč pro DeepSeek. Zadejte svůj API klíč v Nastavení -> AI a Chování.")
+        os.environ["DEEPSEEK_API_KEY"] = api_key
+        if not llm_model.startswith("deepseek/"):
+            llm_model = f"deepseek/{llm_model}"
+    elif llm_provider in ("Kimi / Moonshot AI", "Moonshot AI", "Kimi"):
+        if not api_key:
+            raise ValueError("Chybí API klíč pro Kimi / Moonshot AI. Zadejte svůj API klíč v Nastavení -> AI a Chování.")
+        os.environ["MOONSHOT_API_KEY"] = api_key
+        if not llm_model.startswith("moonshot/"):
+            llm_model = f"moonshot/{llm_model}"
+    elif llm_provider in ("Ollama", "Ollama (Lokální)", "Ollama (Local)"):
         if not llm_model.startswith("ollama/"):
             llm_model = f"ollama/{llm_model}"
+            
+    return full_user_context, llm_model, api_key
+
+async def _run_matching(session: Session, application: Application) -> None:
+    """Samostatné rychlé vyhodnocení shody (Match score & Reason) bez generování dopisu."""
+    job = application.job_posting
+    full_user_context, llm_model, api_key = _get_llm_setup(session, application)
+    
+    matcher = JobMatcher(model=llm_model, api_key=api_key if api_key else None)
+    res = await matcher.evaluate_match(
+        user_cv=full_user_context,
+        job_desc=job.description or "Popis pozice není k dispozici.",
+        job_title=job.title or job.company_name or "Neznámá pozice"
+    )
+    
+    application.match_score = res.match_score
+    application.match_reason = res.match_reason
+    session.add(application)
+    session.commit()
+
+async def evaluate_single_match(application_id: int) -> None:
+    """Samostatné vyhodnocení shody (Match Score & Reason) pro jednu pozici."""
+    with Session(engine) as session:
+        application = session.get(Application, application_id)
+        if not application:
+            logger.error(f"Žádost {application_id} nebyla nalezena.")
+            return
+
+        try:
+            application.status = ApplicationStatus.GENERATING
+            application.updated_at = datetime.now(timezone.utc)
+            session.add(application)
+            session.commit()
+
+            await _run_matching(session, application)
+
+            if application.generated_body:
+                application.status = ApplicationStatus.GENERATED
+            else:
+                application.status = ApplicationStatus.COMPLETED
+            application.updated_at = datetime.now(timezone.utc)
+            application.error_logs = None
+            session.add(application)
+            session.commit()
+            logger.info(f"Úspěšně vyhodnocena shoda {application.match_score}% pro žádost {application_id}.")
+        except Exception as e:
+            logger.error(f"Chyba při vyhodnocování shody pro žádost {application_id}: {e}")
+            if application.generated_body:
+                application.status = ApplicationStatus.GENERATED
+            else:
+                application.status = ApplicationStatus.COMPLETED
+            application.error_logs = f"Vyhodnocení shody selhalo: {str(e)}"
+            application.updated_at = datetime.now(timezone.utc)
+            session.add(application)
+            session.commit()
+
+async def evaluate_all_matches() -> int:
+    """Hromadné vyhodnocení shody pro všechny pozice v databázi."""
+    with Session(engine) as session:
+        from sqlmodel import select
+        apps = session.exec(select(Application)).all()
+        app_ids = [app.id for app in apps]
+    
+    count = 0
+    for app_id in app_ids:
+        try:
+            await evaluate_single_match(app_id)
+            count += 1
+        except Exception as e:
+            logger.warning(f"Chyba při hromadném hodnocení žádosti {app_id}: {e}")
+    return count
+
+async def _run_llm_generation(session: Session, application: Application) -> None:
+    """Vygenerování motivačního e-mailu pomocí LLM."""
+    job = application.job_posting
+    full_user_context, llm_model, api_key = _get_llm_setup(session, application)
                 
     llm_generator = CoverLetterGenerator(model=llm_model, api_key=api_key if api_key else None)
     draft = await llm_generator.generate_email(
@@ -146,7 +234,7 @@ async def _run_llm_generation(session: Session, application: Application) -> Non
         job_title=job.title or job.company_name or "Neznámá pozice"
     )
     
-    # Krok 3: Sestavení výsledného e-mailu (Assembly)
+    # Sestavení výsledného e-mailu (Assembly)
     assembled_body = "\n\n".join([
         draft.osloveni,
         draft.uvod,
@@ -156,9 +244,11 @@ async def _run_llm_generation(session: Session, application: Application) -> Non
         draft.podpis
     ])
     
-    # Uložení výsledku do modelu Application
-    application.match_score = draft.match_score
-    application.match_reason = draft.match_reason
+    # Pokud ještě nebylo spočítáno match_score, uložme ho také
+    if application.match_score is None:
+        application.match_score = draft.match_score
+        application.match_reason = draft.match_reason
+        
     application.generated_subject = f"Zájem o pozici: {job.title or 'Neznámá pozice'}"
     application.generated_body = assembled_body
     
@@ -246,6 +336,24 @@ async def process_job_application(application_id: int) -> None:
             session.add(application)
             session.commit()
             logger.info(f"Úspěšně stažen inzerát pro žádost {application_id}. Scraping dokončen.")
+
+            # Fáze 2: AI Analýza shody (pokud má uživatel nastavené podklady a platný klíč)
+            user_prefs = session.get(UserPreferences, 1)
+            raw_key = (user_prefs.llm_api_key or "").strip() if user_prefs else ""
+            is_ollama = bool(user_prefs and user_prefs.llm_provider in ("Ollama", "Ollama (Lokální)", "Ollama (Local)"))
+            has_api_key = is_ollama or bool(raw_key)
+            has_profile = bool(user_prefs and (user_prefs.cv_file_path or user_prefs.full_name or user_prefs.industry or user_prefs.education))
+
+            if has_api_key and has_profile:
+                try:
+                    logger.info(f"Automaticky spouštím AI vyhodnocení shody pro žádost {application_id}")
+                    await _run_matching(session, application)
+                    logger.info(f"Úspěšně automaticky vyhodnocena shoda {application.match_score}% pro žádost {application_id}.")
+                except Exception as llm_err:
+                    logger.warning(f"Automatické AI vyhodnocení pro žádost {application_id} selhalo: {llm_err}")
+                    application.error_logs = f"Automatické AI hodnocení selhalo: {str(llm_err)}"
+                    session.add(application)
+                    session.commit()
             
         except JobContentValidationError as val_err:
 

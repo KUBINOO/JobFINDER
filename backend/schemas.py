@@ -6,6 +6,10 @@ class ScrapedJob(BaseModel):
     company_name: str
     description: str
 
+class JobMatchingResult(BaseModel):
+    match_score: int
+    match_reason: str
+
 class JobAnalysisResult(BaseModel):
     match_score: int
     match_reason: str
@@ -27,7 +31,7 @@ class PreferencesUpdate(BaseModel):
     cv_file_path: Optional[str] = None
     linkedin_url: Optional[str] = None
     llm_provider: Optional[str] = "Google Gemini"
-    llm_model: Optional[str] = "gemini-1.5-flash"
+    llm_model: Optional[str] = "gemini-3.7-flash"
     llm_api_key: Optional[str] = None
     ollama_host: Optional[str] = None
     tone_of_voice: Optional[str] = "formal"

@@ -6,7 +6,7 @@ from tenacity import retry, stop_after_attempt, wait_exponential, retry_if_excep
 from litellm import acompletion
 from pydantic import ValidationError
 
-from schemas import JobAnalysisResult
+from schemas import JobAnalysisResult, JobMatchingResult
 
 import litellm
 from litellm.exceptions import AuthenticationError, BadRequestError
@@ -21,8 +21,11 @@ class LLMGenerationError(Exception):
     pass
 
 def _should_retry(exception: Exception) -> bool:
-    # Do not retry on permanent errors like invalid API key or bad request parameters
-    if isinstance(exception, (AuthenticationError, BadRequestError)):
+    err_str = str(exception).lower()
+    # Do not retry on permanent errors like invalid API key, auth failure, bad requests or schema errors
+    if isinstance(exception, (AuthenticationError, BadRequestError, ValidationError)):
+        return False
+    if any(keyword in err_str for keyword in ["api_key_invalid", "invalid_api_key", "invalid api key", "400", "401", "403", "permission_denied", "not_found", "unauthenticated"]):
         return False
     return True
 
@@ -52,8 +55,8 @@ class CoverLetterGenerator:
         )
 
     @retry(
-        stop=stop_after_attempt(3),
-        wait=wait_exponential(multiplier=1.5, min=2, max=10),
+        stop=stop_after_attempt(2),
+        wait=wait_exponential(multiplier=1.0, min=1, max=4),
         retry=retry_if_exception(_should_retry),
         reraise=True
     )
@@ -71,15 +74,14 @@ class CoverLetterGenerator:
         ]
 
         async with _llm_semaphore:
-            # Krátká prodleva pro zabránění burst 429 chybám
-            await asyncio.sleep(1)
+            await asyncio.sleep(0.3)
             try:
                 logger.info(f"Volání LLM ({self.model}) pro vygenerování e-mailu pro pozici {job_title}")
                 kwargs = {
                     "model": self.model,
                     "messages": messages,
                     "response_format": JobAnalysisResult,
-                    "temperature": 0.3
+                    "timeout": 20
                 }
                 if self.api_key:
                     kwargs["api_key"] = self.api_key
@@ -113,3 +115,60 @@ class CoverLetterGenerator:
         except Exception as e:
             logger.error(f"Konečné selhání při generování e-mailu pro pozici {job_title}: {e}")
             raise LLMGenerationError(f"Nepodařilo se vygenerovat e-mail: {e}") from e
+
+class JobMatcher:
+    def __init__(self, model: Optional[str] = None, api_key: Optional[str] = None):
+        self.model = model or os.getenv("LLM_MODEL", "gpt-4o")
+        self.api_key = api_key
+        self.system_prompt = (
+            "Jsi striktní a objektivní HR hodnotitel a kariérní poradce. Tvým jediným úkolem je kriticky a realisticky porovnat životopis kandidáta s požadavky pracovní pozice a spočítat shodu.\n\n"
+            "KRITICKÉ INSTRUKCE:\n"
+            "1. HODNOCENÍ (match_score): Celé číslo v rozsahu 0 až 100 vyjadřující realistickou shodu. Pokud kandidátovi chybí klíčové technologie, praxe nebo oborové vzdělání, skóre MUSÍ znatelně klesnout (např. na 25-45%). Žádné umělé lichocení.\n"
+            "2. ZDŮVODNĚNÍ (match_reason): Maximálně 1 až 2 věty v češtině shrnující hlavní silné stránky a chybějící požadavky.\n"
+            "3. Výstup musí být striktně ve formátu JSON odpovídajícím schématu."
+        )
+
+    @retry(
+        stop=stop_after_attempt(2),
+        wait=wait_exponential(multiplier=1.0, min=1, max=4),
+        retry=retry_if_exception(_should_retry),
+        reraise=True
+    )
+    async def evaluate_match(self, user_cv: str, job_desc: str, job_title: str) -> JobMatchingResult:
+        user_prompt = (
+            f"NÁZEV POZICE: {job_title}\n\n"
+            f"POPIS POZICE:\n{job_desc}\n\n"
+            f"CV A PROFIL KANDIDÁTA:\n{user_cv}\n\n"
+            "Vyhodnoť shodu kandidáta s touto pozicí a vrať JSON s match_score a match_reason."
+        )
+
+        messages = [
+            {"role": "system", "content": self.system_prompt},
+            {"role": "user", "content": user_prompt}
+        ]
+
+        async with _llm_semaphore:
+            await asyncio.sleep(0.3)
+            try:
+                logger.info(f"Volání LLM ({self.model}) pro rychlé vyhodnocení shody pro pozici: {job_title}")
+                kwargs = {
+                    "model": self.model,
+                    "messages": messages,
+                    "response_format": JobMatchingResult,
+                    "timeout": 15
+                }
+                if self.api_key:
+                    kwargs["api_key"] = self.api_key
+                    
+                response = await acompletion(**kwargs)
+                content = response.choices[0].message.content
+                if not content:
+                    raise ValueError("LLM vrátilo prázdný obsah odpovědi.")
+                    
+                return JobMatchingResult.model_validate_json(content)
+            except ValidationError as ve:
+                logger.error(f"Nepodařilo se naparsovat shodu z LLM: {ve}")
+                raise LLMGenerationError("LLM vrátilo neplatné schéma shody") from ve
+            except Exception as e:
+                logger.error(f"Volání LLM API pro shodu selhalo: {e}")
+                raise LLMGenerationError(f"Vyhodnocení shody selhalo: {e}") from e

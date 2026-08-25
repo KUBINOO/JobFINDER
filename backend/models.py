@@ -68,7 +68,7 @@ class UserPreferences(SQLModel, table=True):
     cv_file_path: Optional[str] = Field(default=None)
     linkedin_url: Optional[str] = Field(default=None)
     llm_provider: Optional[str] = Field(default="Google Gemini")
-    llm_model: Optional[str] = Field(default="gemini-1.5-flash")
+    llm_model: Optional[str] = Field(default="gemini-3.7-flash")
     llm_api_key: Optional[str] = Field(default=None)
     ollama_host: Optional[str] = Field(default=None)
     tone_of_voice: Optional[str] = Field(default="formal")

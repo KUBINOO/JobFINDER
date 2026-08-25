@@ -59,8 +59,10 @@ const statusColorMap: Record<JobStatus, "default" | "secondary" | "destructive" 
 }
 
 export function JobCard({ job, isSelected, onClick, onDelete }: JobCardProps) {
-  const getScoreColor = (score?: number) => {
-    if (score === undefined) return "text-muted-foreground border-transparent bg-muted/20"
+  const hasScore = typeof job.match_score === "number" && job.match_score !== null
+
+  const getScoreColor = (score?: number | null) => {
+    if (score === undefined || score === null) return "text-muted-foreground border-transparent bg-muted/20"
     if (score >= 80) return "text-green-600 dark:text-green-400 border-green-500/30 bg-green-500/10"
     if (score >= 50) return "text-yellow-600 dark:text-yellow-400 border-yellow-500/30 bg-yellow-500/10"
     return "text-red-600 dark:text-red-400 border-red-500/30 bg-red-500/10"
@@ -69,7 +71,7 @@ export function JobCard({ job, isSelected, onClick, onDelete }: JobCardProps) {
   return (
     <div
       onClick={onClick}
-      title={job.match_reason}
+      title={job.match_reason || undefined}
       className={cn(
         "group relative flex flex-col p-4 mb-3 rounded-2xl border transition-all cursor-pointer select-none",
         isSelected
@@ -97,14 +99,18 @@ export function JobCard({ job, isSelected, onClick, onDelete }: JobCardProps) {
         <h3 className={cn("font-medium text-base line-clamp-1 flex-1 pr-6", isSelected && "text-primary-foreground")}>
           {job.title}
         </h3>
-        {job.match_score !== undefined && (
+        {hasScore ? (
           <div className={cn(
-            "flex items-center justify-center w-9 h-9 shrink-0 rounded-full border text-xs font-bold", 
+            "flex items-center justify-center min-w-9 h-9 px-1.5 shrink-0 rounded-full border text-xs font-bold shadow-xs", 
             isSelected ? "text-primary-foreground border-primary-foreground/50 bg-primary-foreground/20" : getScoreColor(job.match_score)
           )}>
-            {job.match_score}
+            {job.match_score}%
           </div>
-        )}
+        ) : job.status === "Generating" ? (
+          <div className="flex items-center justify-center w-9 h-9 shrink-0 rounded-full bg-primary/10 text-primary animate-pulse text-[10px] font-bold">
+            AI...
+          </div>
+        ) : null}
       </div>
       <div className="flex items-center justify-between mt-auto">
         <span className={cn("text-sm font-medium", isSelected ? "text-primary-foreground/80" : "text-muted-foreground")}>
