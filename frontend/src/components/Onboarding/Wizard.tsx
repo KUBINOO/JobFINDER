@@ -85,7 +85,7 @@ export function OnboardingWizard({ onComplete }: { onComplete: () => void }) {
     setIsSubmitting(true)
     try {
       const response = await apiClient.put("/settings", {
-        full_name: "Jakub Slavík",
+        full_name: "Jan Novák",
         age: 30,
         education: "Vysoká škola",
         industry: "IT / Software",

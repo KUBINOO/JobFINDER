@@ -192,7 +192,7 @@ The scraping system has two main parts:
 - **Multi-Job Search & Exploration (`backend/scrapers/search.py`):**
   - This module powers the *Explore / Search* modal.
   - To add your local job portals (e.g., `Indeed`, `LinkedIn`, `StepStone`, `Monster`):
-    1. Open [`backend/scrapers/search.py`](file:///c:/Users/kubas/OneDrive/Desktop/jobfinder/backend/scrapers/search.py).
+    1. Open `backend/scrapers/search.py`.
     2. Add a new scraper method for your portal (e.g., `_search_indeed(query, count)`).
     3. Construct the search URL for your country/region (e.g., `https://www.indeed.com/jobs?q={query}`).
     4. Parse the job cards with BeautifulSoup (CSS classes for title, company, URL).
@@ -201,7 +201,7 @@ The scraping system has two main parts:
 ---
 
 ### 2. Customizing AI Prompts & Output Language
-All AI logic resides in [`backend/orchestrator.py`](file:///c:/Users/kubas/OneDrive/Desktop/jobfinder/backend/orchestrator.py) and can also be overridden directly in the **Settings** UI:
+All AI logic resides in `backend/orchestrator.py` and can also be overridden directly in the **Settings** UI:
 
 - **Language of Generated Emails & Match Analysis:**
   - In `backend/orchestrator.py`, locate `evaluate_single_match()` and `generate_application_email()`.
@@ -225,7 +225,7 @@ All AI logic resides in [`backend/orchestrator.py`](file:///c:/Users/kubas/OneDr
 ---
 
 ### 4. Email / SMTP Delivery
-The email delivery service ([`backend/email_service.py`](file:///c:/Users/kubas/OneDrive/Desktop/jobfinder/backend/email_service.py)) supports standard RFC SMTP and works globally with:
+The email delivery service (`backend/email_service.py`) supports standard RFC SMTP and works globally with:
 - **Gmail / Google Workspace** (`smtp.gmail.com`, port 587) with App Password.
 - **Outlook / Office 365** (`smtp.office365.com`, port 587).
 - **Yahoo Mail** (`smtp.mail.yahoo.com`, port 587).
