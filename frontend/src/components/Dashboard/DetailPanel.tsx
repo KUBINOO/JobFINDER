@@ -217,21 +217,21 @@ export function DetailPanel({ job, onStatusChange, onOpenSettings }: DetailPanel
               
               {/* Výběr stavu žádosti */}
               <select 
-                className="bg-white/50 dark:bg-black/30 border border-white/20 p-2 rounded-lg text-sm outline-none font-medium"
+                className="bg-white dark:bg-zinc-900 text-foreground border border-black/10 dark:border-white/20 p-2 rounded-lg text-sm outline-none font-medium shadow-sm cursor-pointer"
                 value={job.status}
                 onChange={(e) => onStatusChange(job.id, e.target.value as JobStatus)}
               >
-                <option value="Pending">Čeká</option>
-                <option value="Scraping">Stahuji data</option>
-                <option value="Generating">Analyzuji</option>
-                <option value="Generated">Připraveno</option>
-                <option value="Sending">Odesílám</option>
-                <option value="Sent">Posláno</option>
-                <option value="Completed">Dokončeno</option>
-                <option value="Failed">Selhalo</option>
-                <option value="Interview">Pohovor</option>
-                <option value="Rejected">Zamítnuto</option>
-                <option value="Offer">Nabídka</option>
+                <option value="Pending" className="bg-white dark:bg-zinc-900 text-foreground">Čeká</option>
+                <option value="Scraping" className="bg-white dark:bg-zinc-900 text-foreground">Stahuji data</option>
+                <option value="Generating" className="bg-white dark:bg-zinc-900 text-foreground">Analyzuji</option>
+                <option value="Generated" className="bg-white dark:bg-zinc-900 text-foreground">Připraveno</option>
+                <option value="Sending" className="bg-white dark:bg-zinc-900 text-foreground">Odesílám</option>
+                <option value="Sent" className="bg-white dark:bg-zinc-900 text-foreground">Posláno</option>
+                <option value="Completed" className="bg-white dark:bg-zinc-900 text-foreground">Dokončeno</option>
+                <option value="Failed" className="bg-white dark:bg-zinc-900 text-foreground">Selhalo</option>
+                <option value="Interview" className="bg-white dark:bg-zinc-900 text-foreground">Pohovor</option>
+                <option value="Rejected" className="bg-white dark:bg-zinc-900 text-foreground">Zamítnuto</option>
+                <option value="Offer" className="bg-white dark:bg-zinc-900 text-foreground">Nabídka</option>
               </select>
             </div>
             

@@ -385,12 +385,12 @@ export function HistoryView({
           <select
             value={sortBy}
             onChange={(e: any) => setSortBy(e.target.value)}
-            className="h-9 px-2.5 rounded-xl bg-white/60 dark:bg-black/40 border border-white/30 dark:border-white/10 text-xs font-medium text-foreground focus:outline-none cursor-pointer"
+            className="h-9 px-2.5 rounded-xl bg-white dark:bg-zinc-900 border border-black/10 dark:border-white/15 text-xs font-medium text-foreground focus:outline-none cursor-pointer shadow-sm"
           >
-            <option value="newest">Nejnovější</option>
-            <option value="oldest">Nejstarší</option>
-            <option value="score">Nejvyšší AI shoda</option>
-            <option value="company">Firma (A-Z)</option>
+            <option value="newest" className="bg-white dark:bg-zinc-900 text-foreground">Nejnovější</option>
+            <option value="oldest" className="bg-white dark:bg-zinc-900 text-foreground">Nejstarší</option>
+            <option value="score" className="bg-white dark:bg-zinc-900 text-foreground">Nejvyšší AI shoda</option>
+            <option value="company" className="bg-white dark:bg-zinc-900 text-foreground">Firma (A-Z)</option>
           </select>
 
           <div className="flex p-0.5 bg-black/5 dark:bg-white/10 rounded-lg">
@@ -496,19 +496,19 @@ export function HistoryView({
                         <select
                           value={job.status}
                           onChange={(e: any) => onStatusChange(job.id, e.target.value as JobStatus)}
-                          className="h-7 px-2 text-[11px] font-semibold rounded-lg bg-black/5 dark:bg-white/10 border border-transparent hover:border-white/20 focus:outline-none cursor-pointer"
+                          className="h-7 px-2 text-[11px] font-semibold rounded-lg bg-white dark:bg-zinc-900 text-foreground border border-black/10 dark:border-white/15 hover:border-black/20 dark:hover:border-white/30 focus:outline-none cursor-pointer shadow-sm"
                         >
-                          <option value="Pending">Čeká</option>
-                          <option value="Scraping">Stahuji</option>
-                          <option value="Generating">Analyzuji</option>
-                          <option value="Generated">Připraveno</option>
-                          <option value="Sending">Odesílám</option>
-                          <option value="Sent">Odesláno</option>
-                          <option value="Completed">Dokončeno</option>
-                          <option value="Interview">Pohovor 🎯</option>
-                          <option value="Offer">Nabídka 🎉</option>
-                          <option value="Rejected">Zamítnuto ❌</option>
-                          <option value="Failed">Chyba</option>
+                          <option value="Pending" className="bg-white dark:bg-zinc-900 text-foreground">Čeká</option>
+                          <option value="Scraping" className="bg-white dark:bg-zinc-900 text-foreground">Stahuji</option>
+                          <option value="Generating" className="bg-white dark:bg-zinc-900 text-foreground">Analyzuji</option>
+                          <option value="Generated" className="bg-white dark:bg-zinc-900 text-foreground">Připraveno</option>
+                          <option value="Sending" className="bg-white dark:bg-zinc-900 text-foreground">Odesílám</option>
+                          <option value="Sent" className="bg-white dark:bg-zinc-900 text-foreground">Odesláno</option>
+                          <option value="Completed" className="bg-white dark:bg-zinc-900 text-foreground">Dokončeno</option>
+                          <option value="Interview" className="bg-white dark:bg-zinc-900 text-foreground">Pohovor 🎯</option>
+                          <option value="Offer" className="bg-white dark:bg-zinc-900 text-foreground">Nabídka 🎉</option>
+                          <option value="Rejected" className="bg-white dark:bg-zinc-900 text-foreground">Zamítnuto ❌</option>
+                          <option value="Failed" className="bg-white dark:bg-zinc-900 text-foreground">Chyba</option>
                         </select>
                       </td>
 
@@ -761,15 +761,15 @@ export function HistoryView({
                     onStatusChange(previewJob.id, newStatus)
                     setPreviewJob({ ...previewJob, status: newStatus })
                   }}
-                  className="h-8 px-2.5 text-xs font-medium rounded-lg bg-black/5 dark:bg-white/10 border border-white/20 focus:outline-none cursor-pointer"
+                  className="h-8 px-2.5 text-xs font-medium rounded-lg bg-white dark:bg-zinc-900 text-foreground border border-black/10 dark:border-white/20 focus:outline-none cursor-pointer shadow-sm"
                 >
-                  <option value="Pending">Čeká</option>
-                  <option value="Generated">Připraveno</option>
-                  <option value="Sent">Odesláno</option>
-                  <option value="Completed">Dokončeno</option>
-                  <option value="Interview">Pohovor 🎯</option>
-                  <option value="Offer">Nabídka 🎉</option>
-                  <option value="Rejected">Zamítnuto ❌</option>
+                  <option value="Pending" className="bg-white dark:bg-zinc-900 text-foreground">Čeká</option>
+                  <option value="Generated" className="bg-white dark:bg-zinc-900 text-foreground">Připraveno</option>
+                  <option value="Sent" className="bg-white dark:bg-zinc-900 text-foreground">Odesláno</option>
+                  <option value="Completed" className="bg-white dark:bg-zinc-900 text-foreground">Dokončeno</option>
+                  <option value="Interview" className="bg-white dark:bg-zinc-900 text-foreground">Pohovor 🎯</option>
+                  <option value="Offer" className="bg-white dark:bg-zinc-900 text-foreground">Nabídka 🎉</option>
+                  <option value="Rejected" className="bg-white dark:bg-zinc-900 text-foreground">Zamítnuto ❌</option>
                 </select>
               </div>
 

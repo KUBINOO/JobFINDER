@@ -100,3 +100,19 @@
 .dark ::-webkit-scrollbar-thumb:hover {
   background: rgba(255, 255, 255, 0.2);
 }
+
+/* Explicit styling for select dropdowns & options in light & dark mode */
+select {
+  color-scheme: light dark;
+}
+
+select option {
+  background-color: #ffffff;
+  color: #09090b;
+}
+
+.dark select option,
+html.dark select option {
+  background-color: #18181b !important;
+  color: #fafafa !important;
+}
