@@ -160,18 +160,20 @@ export function DashboardLayout() {
             {/* Top-level Navigation / Tabs */}
             <div className="h-16 flex items-center justify-between px-6 border-b border-white/20 dark:border-white/10 bg-white/30 dark:bg-black/20 backdrop-blur-xl z-20 shrink-0 gap-4">
               <div className="flex items-center gap-6">
-                {/* Modern Brand Logo */}
-                <button
-                  onClick={() => { setActiveTab("search"); setViewMode("master-detail"); }}
+                {/* Modern Brand Logo linking to GitHub */}
+                <a
+                  href="https://github.com/KUBINOO/Joblook-Hleda-pracovn-ch-p-le-itost-"
+                  target="_blank"
+                  rel="noopener noreferrer"
                   className="flex items-center group cursor-pointer focus:outline-none transition-all duration-200 hover:opacity-80 active:scale-95"
-                  title="JobFinder AI"
+                  title="Otevřít JobFinder na GitHubu (KUBINOO)"
                 >
                   <span className="text-2xl font-black tracking-tight font-heading flex items-center gap-1">
                     <span className="text-foreground">Job</span>
                     <span className="bg-gradient-to-r from-blue-600 via-indigo-600 to-violet-600 bg-clip-text text-transparent">Finder</span>
                     <span className="ml-1.5 text-[10px] uppercase font-bold tracking-wider px-1.5 py-0.5 rounded-full bg-blue-500/10 text-blue-600 dark:text-blue-400 border border-blue-500/20">AI</span>
                   </span>
-                </button>
+                </a>
 
                 <div className="h-5 w-[1px] bg-black/10 dark:bg-white/10" />
 
