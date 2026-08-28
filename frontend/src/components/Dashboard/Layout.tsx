@@ -1,7 +1,7 @@
 import React, { useState } from "react"
 import { JobCard, Job, JobStatus } from "./JobCard"
 import { ScrollArea } from "../ui/scroll-area"
-import { Search, History, Settings, LayoutDashboard, ListTodo, Sun, Moon, Sparkles, Loader2 } from "lucide-react"
+import { Search, History, Settings, LayoutDashboard, ListTodo, Sun, Moon, Sparkles, Loader2, Heart } from "lucide-react"
 import { Button } from "../ui/button"
 import { cn } from "../../lib/utils"
 import { DetailPanel } from "./DetailPanel"
@@ -201,6 +201,22 @@ export function DashboardLayout() {
                   </button>
                 </div>
               </div>
+
+              {/* Right Corner Credit Badge */}
+              <a
+                href="https://github.com/KUBINOO"
+                target="_blank"
+                rel="noopener noreferrer"
+                className="flex items-center gap-1.5 px-3 py-1.5 rounded-full bg-white/50 dark:bg-black/30 border border-black/5 dark:border-white/10 text-xs text-muted-foreground hover:text-foreground hover:bg-white/80 dark:hover:bg-black/60 transition-all shadow-sm group cursor-pointer"
+                title="Vytvořil KUBINOO na GitHubu"
+              >
+                <span className="text-[11px] font-medium flex items-center gap-1">
+                  made with <Heart className="w-3.5 h-3.5 text-rose-500 fill-rose-500 animate-pulse" /> for the czechs
+                </span>
+                <span className="text-[11px] font-bold text-foreground group-hover:text-primary transition-colors">
+                  by KUBINOO
+                </span>
+              </a>
             </div>
 
             {/* Dynamic Content based on View Mode */}
