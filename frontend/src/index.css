@@ -55,6 +55,7 @@
   }
 
   body {
+    font-family: "Plus Jakarta Sans", system-ui, -apple-system, sans-serif;
     @apply bg-background text-foreground h-screen w-screen overflow-hidden antialiased;
     /* Soft mesh background / very light grey for glassmorphism pop */
     background-color: #fafafa;

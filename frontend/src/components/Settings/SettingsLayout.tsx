@@ -2,7 +2,7 @@ import React, { useState, useEffect } from "react"
 import { motion, AnimatePresence } from "framer-motion"
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query"
 import axios from "axios"
-import { User, Cpu, Mail, Database, Save, Loader2, AlertTriangle, UploadCloud, FileText, CheckCircle2, Sparkles, ExternalLink, HelpCircle } from "lucide-react"
+import { User, Cpu, Mail, Database, Save, Loader2, AlertTriangle, UploadCloud, FileText, CheckCircle2, Sparkles, ExternalLink, HelpCircle, ArrowLeft } from "lucide-react"
 
 import { Input } from "../ui/input"
 import { Button } from "../ui/button"
@@ -14,9 +14,10 @@ const API_BASE = "http://localhost:8000/api"
 
 interface SettingsLayoutProps {
   initialTab?: string;
+  onBack?: () => void;
 }
 
-export function SettingsLayout({ initialTab = "profile" }: SettingsLayoutProps) {
+export function SettingsLayout({ initialTab = "profile", onBack }: SettingsLayoutProps) {
   const [activeTab, setActiveTab] = useState(initialTab)
   const queryClient = useQueryClient()
 
@@ -236,6 +237,15 @@ export function SettingsLayout({ initialTab = "profile" }: SettingsLayoutProps) 
   return (
     <div className="flex flex-1 h-full bg-white/50 dark:bg-black/50 text-foreground overflow-hidden">
       <div className="w-64 border-r border-border bg-white dark:bg-black p-6 flex flex-col gap-2 shrink-0">
+        {onBack && (
+          <button
+            onClick={onBack}
+            className="flex items-center gap-2 text-xs font-medium text-muted-foreground hover:text-foreground mb-3 transition-colors group cursor-pointer"
+          >
+            <ArrowLeft className="w-3.5 h-3.5 group-hover:-translate-x-0.5 transition-transform" />
+            <span>Zpět na přehled</span>
+          </button>
+        )}
         <h2 className="text-xl font-bold mb-6 tracking-tight">Nastavení</h2>
         {tabs.map(tab => {
           const Icon = tab.icon

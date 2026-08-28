@@ -1,13 +1,14 @@
 import React, { useState } from "react"
 import { JobCard, Job, JobStatus } from "./JobCard"
 import { ScrollArea } from "../ui/scroll-area"
-import { Search, History, Settings, Briefcase, LayoutDashboard, ListTodo, Sun, Moon, Sparkles, Loader2 } from "lucide-react"
+import { Search, History, Settings, LayoutDashboard, ListTodo, Sun, Moon, Sparkles, Loader2 } from "lucide-react"
 import { Button } from "../ui/button"
 import { cn } from "../../lib/utils"
 import { DetailPanel } from "./DetailPanel"
 import { PipelineBoard } from "./PipelineBoard"
 import { AddJobModal } from "./AddJobModal"
 import { ExploreModal } from "./ExploreModal"
+import { HistoryView } from "./HistoryView"
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query"
 import axios from "axios"
 import { SettingsLayout } from "../Settings/SettingsLayout"
@@ -107,136 +108,177 @@ export function DashboardLayout() {
   return (
     <div className="flex h-screen w-screen overflow-hidden bg-transparent">
       {/* LEVÝ PANEL (Sidebar) */}
-      <div className="w-16 flex-shrink-0 flex flex-col items-center py-6 border-r border-white/20 dark:border-white/10 bg-white/40 dark:bg-black/40 backdrop-blur-2xl z-20">
-        <div className="w-10 h-10 rounded-xl bg-primary flex items-center justify-center text-primary-foreground mb-8 shadow-lg">
-          <Briefcase className="w-5 h-5" />
-        </div>
-        
-        <div className="flex flex-col gap-4 flex-1 mt-4">
-          <SidebarIcon icon={<Search />} active={activeTab === "search"} onClick={() => setActiveTab("search")} tooltip="Hledat" />
-          <SidebarIcon icon={<History />} active={activeTab === "history"} onClick={() => setActiveTab("history")} tooltip="Historie" />
+      <div className="w-16 flex-shrink-0 flex flex-col items-center py-5 border-r border-white/20 dark:border-white/10 bg-white/40 dark:bg-black/40 backdrop-blur-2xl z-20">
+        <div className="flex flex-col gap-3 flex-1">
+          <SidebarIcon 
+            icon={<Search />} 
+            active={activeTab === "search"} 
+            onClick={() => { setActiveTab("search"); setViewMode("master-detail"); }} 
+            tooltip="Hledat a žádosti" 
+          />
+          <SidebarIcon 
+            icon={<History />} 
+            active={activeTab === "history"} 
+            onClick={() => setActiveTab("history")} 
+            tooltip="Historie žádostí" 
+          />
         </div>
 
-        <div className="flex flex-col gap-4 mb-4">
+        <div className="flex flex-col gap-3 mb-2">
           <SidebarIcon 
             icon={theme === "dark" ? <Sun /> : <Moon />} 
             onClick={() => setTheme(theme === "dark" ? "light" : "dark")} 
             tooltip="Přepnout motiv" 
           />
-          <SidebarIcon icon={<Settings />} active={activeTab === "settings"} onClick={() => setActiveTab("settings")} tooltip="Nastavení" />
+          <SidebarIcon 
+            icon={<Settings />} 
+            active={activeTab === "settings"} 
+            onClick={() => setActiveTab("settings")} 
+            tooltip="Nastavení" 
+          />
         </div>
       </div>
 
       {/* ZBYTEK OBRAZOVKY S PŘEPÍNAČEM */}
-      <div className="flex-1 flex flex-col">
+      <div className="flex-1 flex flex-col min-w-0">
         {activeTab === "settings" ? (
-          <SettingsLayout initialTab={settingsTab} />
+          <SettingsLayout initialTab={settingsTab} onBack={() => setActiveTab("search")} />
+        ) : activeTab === "history" ? (
+          <HistoryView
+            jobs={jobs}
+            isLoading={isLoading}
+            onStatusChange={handleStatusChange}
+            onDeleteJob={handleDeleteJob}
+            onSelectJobForDetail={(jobId) => {
+              setSelectedJobId(jobId)
+              setActiveTab("search")
+              setViewMode("master-detail")
+            }}
+          />
         ) : (
           <>
             {/* Top-level Navigation / Tabs */}
-            <div className="h-16 flex items-center px-6 border-b border-white/20 dark:border-white/10 bg-white/30 dark:bg-black/20 backdrop-blur-xl z-20 shrink-0 gap-4">
-          <div className="flex p-1 bg-black/5 dark:bg-white/10 rounded-xl">
-            <button
-              onClick={() => setViewMode("master-detail")}
-              className={cn(
-                "flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-medium transition-all",
-                viewMode === "master-detail" ? "bg-white dark:bg-black/50 text-foreground shadow-sm" : "text-muted-foreground hover:text-foreground"
-              )}
-            >
-              <ListTodo className="w-4 h-4" />
-              Nové žádosti
-            </button>
-            <button
-              onClick={() => setViewMode("pipeline")}
-              className={cn(
-                "flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-medium transition-all",
-                viewMode === "pipeline" ? "bg-white dark:bg-black/50 text-foreground shadow-sm" : "text-muted-foreground hover:text-foreground"
-              )}
-            >
-              <LayoutDashboard className="w-4 h-4" />
-              Můj Pipeline
-            </button>
-          </div>
-        </div>
+            <div className="h-16 flex items-center justify-between px-6 border-b border-white/20 dark:border-white/10 bg-white/30 dark:bg-black/20 backdrop-blur-xl z-20 shrink-0 gap-4">
+              <div className="flex items-center gap-6">
+                {/* Modern Brand Logo */}
+                <button
+                  onClick={() => { setActiveTab("search"); setViewMode("master-detail"); }}
+                  className="flex items-center group cursor-pointer focus:outline-none transition-all duration-200 hover:opacity-80 active:scale-95"
+                  title="JobFinder AI"
+                >
+                  <span className="text-2xl font-black tracking-tight font-heading flex items-center gap-1">
+                    <span className="text-foreground">Job</span>
+                    <span className="bg-gradient-to-r from-blue-600 via-indigo-600 to-violet-600 bg-clip-text text-transparent">Finder</span>
+                    <span className="ml-1.5 text-[10px] uppercase font-bold tracking-wider px-1.5 py-0.5 rounded-full bg-blue-500/10 text-blue-600 dark:text-blue-400 border border-blue-500/20">AI</span>
+                  </span>
+                </button>
 
-        {/* Dynamic Content based on View Mode */}
-        <div className="flex-1 flex overflow-hidden">
-          {viewMode === "master-detail" ? (
-            <>
-              {/* STŘEDNÍ PANEL (Master) */}
-              <div className="w-[380px] flex-shrink-0 flex flex-col border-r border-white/20 dark:border-white/10 bg-white/30 dark:bg-black/20 backdrop-blur-xl relative z-10">
-                <div className="p-4 pt-6 z-20">
-                  <div className="flex items-center justify-between mb-4 px-2">
-                    <h2 className="text-xl font-semibold tracking-tight">Aktivní pozice</h2>
-                    <Badge count={jobs.length} />
-                  </div>
-                  
-                  <div className="mb-4 space-y-3">
-                    <ExploreModal />
-                    <AddJobModal />
-                  </div>
+                <div className="h-5 w-[1px] bg-black/10 dark:bg-white/10" />
+
+                {/* View Switcher Tabs */}
+                <div className="flex p-1 bg-black/5 dark:bg-white/10 rounded-xl">
+                  <button
+                    onClick={() => setViewMode("master-detail")}
+                    className={cn(
+                      "flex items-center gap-2 px-4 py-1.5 rounded-lg text-sm font-medium transition-all",
+                      viewMode === "master-detail" ? "bg-white dark:bg-black/50 text-foreground shadow-sm" : "text-muted-foreground hover:text-foreground"
+                    )}
+                  >
+                    <ListTodo className="w-4 h-4" />
+                    Nové žádosti
+                  </button>
+                  <button
+                    onClick={() => setViewMode("pipeline")}
+                    className={cn(
+                      "flex items-center gap-2 px-4 py-1.5 rounded-lg text-sm font-medium transition-all",
+                      viewMode === "pipeline" ? "bg-white dark:bg-black/50 text-foreground shadow-sm" : "text-muted-foreground hover:text-foreground"
+                    )}
+                  >
+                    <LayoutDashboard className="w-4 h-4" />
+                    Můj Pipeline
+                  </button>
                 </div>
+              </div>
+            </div>
 
-                <ScrollArea className="flex-1 px-4">
-                  <div className="pb-6">
-                    {isLoading && jobs.length === 0 ? (
-                      <div className="text-center py-10 text-muted-foreground">Načítání...</div>
-                    ) : jobs.length === 0 ? (
-                      <div className="text-center py-10 text-muted-foreground">Zatím nemáte žádné pozice</div>
-                    ) : (
-                      jobs.map((job) => (
-                        <JobCard
-                          key={job.id}
-                          job={job}
-                          isSelected={job.id === selectedJobId}
-                          onClick={() => setSelectedJobId(job.id)}
-                          onDelete={() => handleDeleteJob(job.id)}
-                        />
-                      ))
+            {/* Dynamic Content based on View Mode */}
+            <div className="flex-1 flex overflow-hidden">
+              {viewMode === "master-detail" ? (
+                <>
+                  {/* STŘEDNÍ PANEL (Master) */}
+                  <div className="w-[380px] flex-shrink-0 flex flex-col border-r border-white/20 dark:border-white/10 bg-white/30 dark:bg-black/20 backdrop-blur-xl relative z-10">
+                    <div className="p-4 pt-6 z-20">
+                      <div className="flex items-center justify-between mb-4 px-2">
+                        <h2 className="text-xl font-semibold tracking-tight">Aktivní pozice</h2>
+                        <Badge count={jobs.length} />
+                      </div>
+                      
+                      <div className="mb-4 space-y-3">
+                        <ExploreModal />
+                        <AddJobModal />
+                      </div>
+                    </div>
+
+                    <ScrollArea className="flex-1 px-4">
+                      <div className="pb-6">
+                        {isLoading && jobs.length === 0 ? (
+                          <div className="text-center py-10 text-muted-foreground">Načítání...</div>
+                        ) : jobs.length === 0 ? (
+                          <div className="text-center py-10 text-muted-foreground">Zatím nemáte žádné pozice</div>
+                        ) : (
+                          jobs.map((job) => (
+                            <JobCard
+                              key={job.id}
+                              job={job}
+                              isSelected={job.id === selectedJobId}
+                              onClick={() => setSelectedJobId(job.id)}
+                              onDelete={() => handleDeleteJob(job.id)}
+                            />
+                          ))
+                        )}
+                      </div>
+                    </ScrollArea>
+
+                    {/* STICKY TLAČÍTKO PRO HROMADNÝ MATCHING */}
+                    {jobs.length > 0 && (
+                      <div className="p-3 border-t border-white/20 dark:border-white/10 bg-white/40 dark:bg-black/40 backdrop-blur-xl z-20 shrink-0">
+                        <Button
+                          onClick={() => matchAllMutation.mutate()}
+                          disabled={matchAllMutation.isPending || isLoading}
+                          className="w-full h-11 rounded-xl font-semibold gap-2 shadow-md bg-gradient-to-r from-primary to-primary/80 hover:from-primary/90 hover:to-primary text-primary-foreground hover:shadow-primary/20 hover:scale-[1.01] transition-all text-xs"
+                        >
+                          {matchAllMutation.isPending ? (
+                            <>
+                              <Loader2 className="w-4 h-4 animate-spin" />
+                              <span>Vyhodnocuji všechny pozice...</span>
+                            </>
+                          ) : (
+                            <>
+                              <Sparkles className="w-4 h-4" />
+                              <span>Spočítat AI shodu pro všechny ({jobs.length})</span>
+                            </>
+                          )}
+                        </Button>
+                      </div>
                     )}
                   </div>
-                </ScrollArea>
 
-                {/* STICKY TLAČÍTKO PRO HROMADNÝ MATCHING */}
-                {jobs.length > 0 && (
-                  <div className="p-3 border-t border-white/20 dark:border-white/10 bg-white/40 dark:bg-black/40 backdrop-blur-xl z-20 shrink-0">
-                    <Button
-                      onClick={() => matchAllMutation.mutate()}
-                      disabled={matchAllMutation.isPending || isLoading}
-                      className="w-full h-11 rounded-xl font-semibold gap-2 shadow-md bg-gradient-to-r from-primary to-primary/80 hover:from-primary/90 hover:to-primary text-primary-foreground hover:shadow-primary/20 hover:scale-[1.01] transition-all text-xs"
-                    >
-                      {matchAllMutation.isPending ? (
-                        <>
-                          <Loader2 className="w-4 h-4 animate-spin" />
-                          <span>Vyhodnocuji všechny pozice...</span>
-                        </>
-                      ) : (
-                        <>
-                          <Sparkles className="w-4 h-4" />
-                          <span>Spočítat AI shodu pro všechny ({jobs.length})</span>
-                        </>
-                      )}
-                    </Button>
+                  {/* PRAVÝ PANEL (Detail) */}
+                  <div className="flex-1 flex flex-col bg-white/10 dark:bg-black/10 relative">
+                    <DetailPanel 
+                      job={selectedJob} 
+                      onStatusChange={handleStatusChange} 
+                      onOpenSettings={handleOpenSettings}
+                    />
                   </div>
-                )}
-              </div>
-
-              {/* PRAVÝ PANEL (Detail) */}
-              <div className="flex-1 flex flex-col bg-white/10 dark:bg-black/10 relative">
-                <DetailPanel 
-                  job={selectedJob} 
-                  onStatusChange={handleStatusChange} 
-                  onOpenSettings={handleOpenSettings}
-                />
-              </div>
-            </>
-          ) : (
-            <PipelineBoard jobs={jobs} onJobClick={(job) => {
-              setSelectedJobId(job.id)
-              setViewMode("master-detail")
-            }} onDeleteJob={handleDeleteJob} />
-          )}
-        </div>
+                </>
+              ) : (
+                <PipelineBoard jobs={jobs} onJobClick={(job) => {
+                  setSelectedJobId(job.id)
+                  setViewMode("master-detail")
+                }} onDeleteJob={handleDeleteJob} />
+              )}
+            </div>
           </>
         )}
       </div>

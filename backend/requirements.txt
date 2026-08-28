@@ -12,4 +12,5 @@ aiosmtplib
 python-multipart
 aiofiles
 pymupdf
-
+httpx
+beautifulsoup4
