@@ -162,7 +162,7 @@ export function DashboardLayout() {
               <div className="flex items-center gap-6">
                 {/* Modern Brand Logo linking to GitHub */}
                 <a
-                  href="https://github.com/KUBINOO/Joblook-Hleda-pracovn-ch-p-le-itost-"
+                  href="https://github.com/KUBINOO/JobFINDER"
                   target="_blank"
                   rel="noopener noreferrer"
                   className="flex items-center group cursor-pointer focus:outline-none transition-all duration-200 hover:opacity-80 active:scale-95"
