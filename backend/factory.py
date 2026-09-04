@@ -1,6 +1,9 @@
+from typing import Optional
 from urllib.parse import urlparse
 from scrapers.base import BaseJobScraper
+from client import StealthClient
 from scrapers.providers import (
+    CzechJobScraper,
     JobsCzScraper,
     PraceCzScraper,
     VolnamistaScraper,
@@ -8,18 +11,19 @@ from scrapers.providers import (
     StartupJobsScraper
 )
 
-def get_scraper(url: str) -> BaseJobScraper:
+def get_scraper(url: str, client: Optional[StealthClient] = None) -> BaseJobScraper:
     domain = urlparse(url).netloc.lower()
     
     if "startupjobs" in domain:
-        return StartupJobsScraper()
+        return StartupJobsScraper(client=client)
     elif "prace.cz" in domain:
-        return PraceCzScraper()
+        return PraceCzScraper(client=client)
     elif "volnamista.cz" in domain:
-        return VolnamistaScraper()
+        return VolnamistaScraper(client=client)
     elif "profesia.cz" in domain:
-        return ProfesiaScraper()
+        return ProfesiaScraper(client=client)
     elif "jobs.cz" in domain:
-        return JobsCzScraper()
+        return JobsCzScraper(client=client)
     else:
-        raise ValueError(f"No scraper available for domain: {domain}")
+        # Generický scraper s podporou JSON-LD, meta tagů a Jina AI pro libovolné weby
+        return CzechJobScraper(client=client)

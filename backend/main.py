@@ -27,19 +27,4 @@ app.include_router(applications.router)
 def read_root():
     return {"status": "ok", "message": "API is running"}
 
-def process_job_application(job_id: int):
-    # Long-running job application logic runs here locally
-    print(f"Background task started for job {job_id}...")
-    # Add automation, browser interaction, or API logic here
-    print(f"Background task finished for job {job_id}.")
-
-@app.post("/jobs/automate")
-def automate_job(background_tasks: BackgroundTasks):
-    # Create job tracking record in DB and get its ID (mocked for now)
-    job_id = 1
-    
-    # Enqueue native FastAPI background task
-    background_tasks.add_task(process_job_application, job_id)
-    return {"message": "Job automation started in the background", "job_id": job_id}
-
 

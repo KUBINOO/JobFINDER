@@ -16,6 +16,7 @@ export interface UserSettings {
   ollama_host: string | null;
   tone_of_voice?: string | null;
   custom_prompt?: string | null;
+  smtp_host?: string | null;
   smtp_email: string;
   smtp_password: string;
   smtp_port: number;

@@ -88,7 +88,7 @@ export function HistoryView({
   // Statistiky
   const stats = useMemo(() => {
     const total = jobs.length
-    const sent = jobs.filter((j) => ["Sent", "Completed"].includes(j.status)).length
+    const sent = jobs.filter((j) => j.status === "Sent").length
     const interview = jobs.filter((j) => j.status === "Interview").length
     const offer = jobs.filter((j) => j.status === "Offer").length
     const rejected = jobs.filter((j) => j.status === "Rejected").length
@@ -117,7 +117,7 @@ export function HistoryView({
 
         // Kategorie filtru
         if (filterCategory === "sent") {
-          return ["Sent", "Completed"].includes(job.status)
+          return job.status === "Sent"
         }
         if (filterCategory === "interview") {
           return job.status === "Interview"
@@ -129,7 +129,7 @@ export function HistoryView({
           return job.status === "Rejected"
         }
         if (filterCategory === "draft") {
-          return ["Pending", "Scraping", "Generating", "Generated", "Failed"].includes(job.status)
+          return ["Pending", "Scraping", "Generating", "Generated", "Completed", "Failed"].includes(job.status)
         }
 
         return true

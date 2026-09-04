@@ -39,7 +39,10 @@ export function DashboardLayout() {
     },
     refetchInterval: (query) => {
       const data = query.state.data as Job[] | undefined
-      const hasActiveJobs = data?.some((j) => ["Pending", "Scraping", "Generating", "Sending"].includes(j.status))
+      const hasActiveJobs = data?.some((j) => 
+        ["Pending", "Scraping", "Generating", "Sending"].includes(j.status) ||
+        (j.status === "Completed" && (j.match_score === undefined || j.match_score === null))
+      )
       return hasActiveJobs ? 2000 : false
     },
   })
@@ -211,7 +214,7 @@ export function DashboardLayout() {
                 title="Vytvořil KUBINOO na GitHubu"
               >
                 <span className="text-[11px] font-medium flex items-center gap-1">
-                  made with <Heart className="w-3.5 h-3.5 text-rose-500 fill-rose-500 animate-pulse" /> for the czechs
+                  made with <Heart className="w-3.5 h-3.5 text-rose-500 fill-rose-500 animate-pulse" />
                 </span>
                 <span className="text-[11px] font-bold text-foreground group-hover:text-primary transition-colors">
                   by KUBINOO
@@ -291,10 +294,15 @@ export function DashboardLayout() {
                   </div>
                 </>
               ) : (
-                <PipelineBoard jobs={jobs} onJobClick={(job) => {
-                  setSelectedJobId(job.id)
-                  setViewMode("master-detail")
-                }} onDeleteJob={handleDeleteJob} />
+                <PipelineBoard 
+                  jobs={jobs} 
+                  onJobClick={(job) => {
+                    setSelectedJobId(job.id)
+                    setViewMode("master-detail")
+                  }} 
+                  onDeleteJob={handleDeleteJob} 
+                  onStatusChange={handleStatusChange}
+                />
               )}
             </div>
           </>

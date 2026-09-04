@@ -59,11 +59,12 @@ class TestMultiSearchScraper(unittest.IsolatedAsyncioTestCase):
         scraper = JobSearchScraper()
         
         # Mockování jednotlivých scraperů
-        def mock_single(source, query, count):
+        def mock_single(source, query, count, locations=None):
+            from scrapers.search import SearchResult
             if "startupjobs" in source:
-                return [f"https://www.startupjobs.cz/nabidka/{i}" for i in range(count)]
+                return [SearchResult(url=f"https://www.startupjobs.cz/nabidka/{i}", title=f"Job {i}", company="SJ", source="StartupJobs.cz") for i in range(count)]
             elif "jobs.cz" in source:
-                return [f"https://www.jobs.cz/rpd/{i}" for i in range(count)]
+                return [SearchResult(url=f"https://www.jobs.cz/rpd/{i}", title=f"Job {i}", company="Jobs", source="Jobs.cz") for i in range(count)]
             return []
             
         scraper.search_single_source = AsyncMock(side_effect=mock_single)
@@ -71,12 +72,13 @@ class TestMultiSearchScraper(unittest.IsolatedAsyncioTestCase):
         results = await scraper.search_jobs(
             query="Python", 
             count=7, 
-            sources=["jobs.cz", "startupjobs.cz"]
+            sources=["jobs.cz", "startupjobs.cz"],
+            locations=["praha", "jihomoravsky"]
         )
         
         self.assertEqual(len(results), 7)
-        jobs_cz_count = sum(1 for r in results if "www.jobs.cz" in r)
-        startup_count = sum(1 for r in results if "startupjobs.cz" in r)
+        jobs_cz_count = sum(1 for r in results if "www.jobs.cz" in r.url)
+        startup_count = sum(1 for r in results if "startupjobs.cz" in r.url)
         
         self.assertEqual(jobs_cz_count + startup_count, 7)
         self.assertIn(jobs_cz_count, [3, 4])

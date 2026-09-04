@@ -32,9 +32,17 @@ async def upload_cv(file: UploadFile = File(...), session: Session = Depends(get
     file_path = os.path.abspath(os.path.join(UPLOAD_DIR, safe_name))
     
     try:
+        MAX_FILE_SIZE = 15 * 1024 * 1024  # 15 MB
         content = await file.read()
+        if len(content) > MAX_FILE_SIZE:
+            raise HTTPException(
+                status_code=400,
+                detail="Velikost souboru přesahuje povolený limit 15 MB."
+            )
         async with aiofiles.open(file_path, 'wb') as out_file:
             await out_file.write(content)
+    except HTTPException:
+        raise
     except Exception as e:
         raise HTTPException(
             status_code=500, 

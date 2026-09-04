@@ -29,6 +29,7 @@ class ExploreRequest(BaseModel):
     count: int
     query: Optional[str] = ""
     sources: Optional[List[str]] = None
+    locations: Optional[List[str]] = None
 
 @router.post("/explore")
 async def explore_jobs(explore_req: ExploreRequest, background_tasks: BackgroundTasks, session: Session = Depends(get_session)):
@@ -40,12 +41,13 @@ async def explore_jobs(explore_req: ExploreRequest, background_tasks: Background
         session.refresh(user)
 
     from scrapers.search import JobSearchScraper
-    scraper = JobSearchScraper()
-    search_results = await scraper.search_jobs(
-        query=explore_req.query, 
-        count=explore_req.count,
-        sources=explore_req.sources
-    )
+    async with JobSearchScraper() as scraper:
+        search_results = await scraper.search_jobs(
+            query=explore_req.query, 
+            count=explore_req.count,
+            sources=explore_req.sources,
+            locations=explore_req.locations
+        )
 
     if not search_results:
         raise HTTPException(status_code=404, detail="Žádné relevantní pozice nebyly nalezeny pro zadané klíčové slovo.")

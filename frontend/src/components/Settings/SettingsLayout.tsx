@@ -197,14 +197,26 @@ export function SettingsLayout({ initialTab = "profile", onBack }: SettingsLayou
     })
   }
 
-  const handleTestSmtp = () => {
-    const host = prompt("Zadejte SMTP Host:", "smtp.gmail.com")
-    if (!host) return
+  const handleTestSmtp = (e: React.MouseEvent) => {
+    e.preventDefault()
+    const form = (e.currentTarget as HTMLElement).closest("form")
+    const formData = form ? new FormData(form) : null
+
+    const host = ((formData?.get("smtp_host") as string) || settings?.smtp_host || "").trim() || "smtp.gmail.com"
+    const port = formData?.get("smtp_port") ? parseInt(formData.get("smtp_port") as string, 10) : (settings?.smtp_port || 587)
+    const username = ((formData?.get("smtp_email") as string) || settings?.smtp_email || "").trim()
+    const password = ((formData?.get("smtp_password") as string) || settings?.smtp_password || "").trim()
+
+    if (!username || !password) {
+      alert("Před testem prosím vyplňte e-mail a heslo pro SMTP.")
+      return
+    }
+
     testSmtpMutation.mutate({
       host,
-      port: settings.smtp_port,
-      username: settings.smtp_email,
-      password: settings.smtp_password
+      port,
+      username,
+      password
     })
   }
 
@@ -540,22 +552,28 @@ export function SettingsLayout({ initialTab = "profile", onBack }: SettingsLayou
                   <div className="space-y-6">
                     <div className="grid grid-cols-2 gap-6">
                       <div className="space-y-2">
-                        <label className={labelClass}>E-mail pro přihlášení (Username)</label>
-                        <Input name="smtp_email" defaultValue={settings.smtp_email || ""} placeholder="vas.email@gmail.com" className="bg-white dark:bg-black" />
+                        <label className={labelClass}>SMTP Host / Server</label>
+                        <Input name="smtp_host" defaultValue={settings?.smtp_host || ""} placeholder="smtp.gmail.com nebo smtp.seznam.cz" className="bg-white dark:bg-black" />
+                      </div>
+                      <div className="space-y-2">
+                        <label className={labelClass}>SMTP Port</label>
+                        <Input name="smtp_port" type="number" defaultValue={settings?.smtp_port || 587} className="bg-white dark:bg-black" />
+                      </div>
+                    </div>
+                    <div className="grid grid-cols-2 gap-6">
+                      <div className="space-y-2">
+                        <label className={labelClass}>E-mail pro přihlášení (Username / Adresa)</label>
+                        <Input name="smtp_email" defaultValue={settings?.smtp_email || ""} placeholder="vas.email@gmail.com" className="bg-white dark:bg-black" />
                       </div>
                       <div className="space-y-2">
                         <label className={labelClass}>Heslo (App Password)</label>
-                        <Input name="smtp_password" type="password" defaultValue={settings.smtp_password || ""} className="bg-white dark:bg-black font-mono text-sm" />
+                        <Input name="smtp_password" type="password" defaultValue={settings?.smtp_password || ""} className="bg-white dark:bg-black font-mono text-sm" />
                         <div className="border-l-4 border-blue-500 bg-blue-50/50 dark:bg-blue-900/20 p-3 rounded-r-lg mt-2">
                           <p className="text-sm text-blue-900 dark:text-blue-200">
                             <strong>Důležité:</strong> Nezadávejte sem své běžné heslo k účtu (např. k Gmailu). Kvůli dvoufázovému ověření (2FA) je nutné ve vašem účtu vygenerovat speciální <strong>Heslo pro aplikace (App Password)</strong> určené přímo pro tento nástroj.
                           </p>
                         </div>
                       </div>
-                    </div>
-                    <div className="space-y-2">
-                      <label className={labelClass}>SMTP Port</label>
-                      <Input name="smtp_port" type="number" defaultValue={settings.smtp_port || 587} className="bg-white dark:bg-black" />
                     </div>
                     <div className="pt-4">
                       <Button type="button" variant="secondary" onClick={handleTestSmtp} disabled={testSmtpMutation.isPending}>

@@ -7,6 +7,9 @@ export enum ApplicationStatus {
   SENT = 'SENT',
   COMPLETED = 'COMPLETED',
   FAILED = 'FAILED',
+  INTERVIEW = 'INTERVIEW',
+  REJECTED = 'REJECTED',
+  OFFER = 'OFFER',
 }
 
 export interface JobApplication {

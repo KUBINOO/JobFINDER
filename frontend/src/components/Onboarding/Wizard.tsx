@@ -29,6 +29,7 @@ export function OnboardingWizard({ onComplete }: { onComplete: () => void }) {
     model: "gemini-3.7-flash",
     api_key: "",
     ollama_host: "",
+    smtp_host: "",
     smtp_email: "",
     smtp_password: "",
     smtp_port: "587",
@@ -59,6 +60,7 @@ export function OnboardingWizard({ onComplete }: { onComplete: () => void }) {
         llm_model: formData.model,
         llm_api_key: formData.api_key.trim() || null,
         ollama_host: formData.ollama_host.trim() || null,
+        smtp_host: formData.smtp_host.trim() || "",
         smtp_email: formData.smtp_email.trim() || "",
         smtp_password: formData.smtp_password.trim() || "",
         smtp_port: formData.smtp_port ? parseInt(formData.smtp_port, 10) : 587,
@@ -423,10 +425,10 @@ function Step3API({ formData, setFormData }: any) {
           <div className="space-y-3">
             <div className="grid grid-cols-4 gap-4">
               <Input 
-                placeholder="E-mailová adresa (např. user@gmail.com)" 
-                type="email" 
-                value={formData.smtp_email}
-                onChange={(e) => setFormData({...formData, smtp_email: e.target.value})}
+                placeholder="SMTP Host (např. smtp.gmail.com nebo smtp.seznam.cz)" 
+                type="text" 
+                value={formData.smtp_host}
+                onChange={(e) => setFormData({...formData, smtp_host: e.target.value})}
                 className="col-span-3 h-11 bg-white/40 dark:bg-black/20" 
               />
               <select 
@@ -437,6 +439,15 @@ function Step3API({ formData, setFormData }: any) {
                 <option value="587" className="bg-background text-foreground">587 (STARTTLS)</option>
                 <option value="465" className="bg-background text-foreground">465 (SSL)</option>
               </select>
+            </div>
+            <div className="grid grid-cols-1 gap-2">
+              <Input 
+                placeholder="E-mailová adresa / Username (např. user@gmail.com)" 
+                type="email" 
+                value={formData.smtp_email}
+                onChange={(e) => setFormData({...formData, smtp_email: e.target.value})}
+                className="h-11 bg-white/40 dark:bg-black/20" 
+              />
             </div>
             <div className="grid grid-cols-1 gap-2">
               <Input 

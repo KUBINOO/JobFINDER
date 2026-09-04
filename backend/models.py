@@ -73,6 +73,7 @@ class UserPreferences(SQLModel, table=True):
     ollama_host: Optional[str] = Field(default=None)
     tone_of_voice: Optional[str] = Field(default="formal")
     custom_prompt: Optional[str] = Field(default=None)
+    smtp_host: Optional[str] = Field(default="")
     smtp_email: Optional[str] = Field(default="")
     smtp_password: Optional[str] = Field(default="")
     smtp_port: Optional[int] = Field(default=587)

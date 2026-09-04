@@ -36,6 +36,7 @@ class PreferencesUpdate(BaseModel):
     ollama_host: Optional[str] = None
     tone_of_voice: Optional[str] = "formal"
     custom_prompt: Optional[str] = None
+    smtp_host: Optional[str] = ""
     smtp_email: Optional[str] = ""
     smtp_password: Optional[str] = ""
     smtp_port: Optional[int] = 587

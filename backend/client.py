@@ -8,8 +8,10 @@ from tenacity import retry, stop_after_attempt, wait_exponential, retry_if_excep
 logger = logging.getLogger(__name__)
 
 class StealthClient:
-    def __init__(self, impersonate: str = "chrome110"):
+    def __init__(self, impersonate: str = "chrome110", delay_min: float = 1.0, delay_max: float = 3.0):
         self.impersonate = impersonate
+        self.delay_min = delay_min
+        self.delay_max = delay_max
 
     @retry(
         stop=stop_after_attempt(3),
@@ -18,8 +20,10 @@ class StealthClient:
         reraise=True
     )
     async def get(self, url: str, **kwargs: Any) -> Response:
-        # Random delay to avoid rate limits
-        await asyncio.sleep(random.uniform(1.0, 3.0))
+        # Dynamic delay based on user settings to avoid rate limits
+        min_d = max(0.1, float(self.delay_min or 1.0))
+        max_d = max(min_d, float(self.delay_max or 3.0))
+        await asyncio.sleep(random.uniform(min_d, max_d))
         
         async with AsyncSession(impersonate=self.impersonate) as session:
             logger.debug(f"Fetching {url}")

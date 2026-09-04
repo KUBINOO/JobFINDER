@@ -9,6 +9,7 @@ from sqlmodel import Session
 from database import engine
 from models import Application, ApplicationStatus, UserPreferences
 
+from client import StealthClient
 from factory import get_scraper
 from llm_service import CoverLetterGenerator, JobMatcher
 from email_service import AsyncEmailSender
@@ -25,7 +26,11 @@ async def _run_scraping(session: Session, application: Application) -> None:
     Krok 1: Získání dat z pracovního inzerátu (Scraping) a validace obsahu (Quality Gate).
     """
     job = application.job_posting
-    scraper = get_scraper(job.source_url)
+    user_prefs = session.get(UserPreferences, 1)
+    delay_min = user_prefs.scraper_delay_min if (user_prefs and user_prefs.scraper_delay_min is not None) else 1.0
+    delay_max = user_prefs.scraper_delay_max if (user_prefs and user_prefs.scraper_delay_max is not None) else 3.0
+    client = StealthClient(delay_min=delay_min, delay_max=delay_max)
+    scraper = get_scraper(job.source_url, client=client)
     scraped_job = await scraper.extract_job_details(job.source_url)
     
     # Aktualizace detailů inzerátu v databázi (nepřepisovat kvalitní název generickými texty)
@@ -109,6 +114,11 @@ def _get_llm_setup(session: Session, application: Application):
     if not full_user_context:
         raise ValueError("Chybí podklady pro AI: Nemáte nahraný životopis (PDF) ani vyplněný profil v Nastavení. Doplňte prosím své údaje, aby AI mohla vyhodnotit shodu s pozicí.")
 
+    tone_of_voice = (user_prefs.tone_of_voice if user_prefs and user_prefs.tone_of_voice else "formal").strip()
+    ollama_host = (user_prefs.ollama_host if user_prefs and user_prefs.ollama_host else None)
+    if ollama_host:
+        ollama_host = ollama_host.strip()
+
     llm_provider = user_prefs.llm_provider if user_prefs else "Google Gemini"
     llm_model = (user_prefs.llm_model if user_prefs and user_prefs.llm_model else "gemini-3.7-flash").strip()
     if llm_model == "gemini-1.5-flash":
@@ -151,14 +161,14 @@ def _get_llm_setup(session: Session, application: Application):
         if not llm_model.startswith("ollama/"):
             llm_model = f"ollama/{llm_model}"
             
-    return full_user_context, llm_model, api_key
+    return full_user_context, llm_model, api_key, ollama_host, tone_of_voice
 
 async def _run_matching(session: Session, application: Application) -> None:
     """Samostatné rychlé vyhodnocení shody (Match score & Reason) bez generování dopisu."""
     job = application.job_posting
-    full_user_context, llm_model, api_key = _get_llm_setup(session, application)
+    full_user_context, llm_model, api_key, ollama_host, tone_of_voice = _get_llm_setup(session, application)
     
-    matcher = JobMatcher(model=llm_model, api_key=api_key if api_key else None)
+    matcher = JobMatcher(model=llm_model, api_key=api_key if api_key else None, api_base=ollama_host)
     res = await matcher.evaluate_match(
         user_cv=full_user_context,
         job_desc=job.description or "Popis pozice není k dispozici.",
@@ -225,9 +235,14 @@ async def evaluate_all_matches() -> int:
 async def _run_llm_generation(session: Session, application: Application) -> None:
     """Vygenerování motivačního e-mailu pomocí LLM."""
     job = application.job_posting
-    full_user_context, llm_model, api_key = _get_llm_setup(session, application)
+    full_user_context, llm_model, api_key, ollama_host, tone_of_voice = _get_llm_setup(session, application)
                 
-    llm_generator = CoverLetterGenerator(model=llm_model, api_key=api_key if api_key else None)
+    llm_generator = CoverLetterGenerator(
+        model=llm_model, 
+        api_key=api_key if api_key else None,
+        api_base=ollama_host,
+        tone_of_voice=tone_of_voice
+    )
     draft = await llm_generator.generate_email(
         user_cv=full_user_context,
         job_desc=job.description or "Popis pozice není k dispozici.",
@@ -270,17 +285,21 @@ async def _run_sending(
     smtp_email = (user_prefs and user_prefs.smtp_email) or user.email or user.smtp_username
     smtp_password = (user_prefs and user_prefs.smtp_password) or user.smtp_password
     smtp_port = (user_prefs and user_prefs.smtp_port) or 587
+    smtp_host = (user_prefs and user_prefs.smtp_host) or ""
     cv_pdf_path = (user_prefs and user_prefs.cv_file_path)
     
     if not smtp_email or not smtp_password:
         logger.warning("Uživatel nemá nakonfigurované SMTP údaje v nastavení.")
         raise ValueError("V nastavení chybí SMTP přihlašovací údaje (e-mail a heslo aplikace).")
     
-    host = "smtp.gmail.com"
-    if "@seznam.cz" in smtp_email:
+    if smtp_host and smtp_host.strip():
+        host = smtp_host.strip()
+    elif "@seznam.cz" in smtp_email:
         host = "smtp.seznam.cz"
     elif "@outlook.com" in smtp_email or "@hotmail.com" in smtp_email:
         host = "smtp.office365.com"
+    else:
+        host = "smtp.gmail.com"
         
     email_sender = AsyncEmailSender(
         host=host, 
@@ -290,7 +309,10 @@ async def _run_sending(
         sender_email=smtp_email
     )
     
-    final_recipient = recipient_email or getattr(job, "hr_email", None) or smtp_email
+    final_recipient = (recipient_email or "").strip()
+    if not final_recipient or "@" not in final_recipient:
+        raise ValueError("Chybí platná e-mailová adresa příjemce (firmy / HR). Vyplňte prosím e-mail v detailu inzerátu před odesláním.")
+        
     final_subject = subject or application.generated_subject or f"Zájem o pozici: {job.title or 'Pracovní pozice'}"
     final_body = body or application.generated_body or ""
     
@@ -328,13 +350,6 @@ async def process_job_application(application_id: int) -> None:
             session.commit()
             
             await _run_scraping(session, application)
-            
-            # Po úspěšném scrapingu nastavíme stav na COMPLETED (dokončeno stažení inzerátu)
-            application.status = ApplicationStatus.COMPLETED
-            application.updated_at = datetime.now(timezone.utc)
-            application.error_logs = None
-            session.add(application)
-            session.commit()
             logger.info(f"Úspěšně stažen inzerát pro žádost {application_id}. Scraping dokončen.")
 
             # Fáze 2: AI Analýza shody (pokud má uživatel nastavené podklady a platný klíč)
@@ -346,14 +361,29 @@ async def process_job_application(application_id: int) -> None:
 
             if has_api_key and has_profile:
                 try:
+                    # Nastavit status GENERATING, aby frontend polling věděl, že se stále pracuje
+                    application.status = ApplicationStatus.GENERATING
+                    application.updated_at = datetime.now(timezone.utc)
+                    session.add(application)
+                    session.commit()
+
                     logger.info(f"Automaticky spouštím AI vyhodnocení shody pro žádost {application_id}")
                     await _run_matching(session, application)
                     logger.info(f"Úspěšně automaticky vyhodnocena shoda {application.match_score}% pro žádost {application_id}.")
                 except Exception as llm_err:
                     logger.warning(f"Automatické AI vyhodnocení pro žádost {application_id} selhalo: {llm_err}")
                     application.error_logs = f"Automatické AI hodnocení selhalo: {str(llm_err)}"
-                    session.add(application)
-                    session.commit()
+            
+            # Nastavíme konečný stav po stažení a vyhodnocení
+            if application.generated_body:
+                application.status = ApplicationStatus.GENERATED
+            else:
+                application.status = ApplicationStatus.COMPLETED
+                
+            application.updated_at = datetime.now(timezone.utc)
+            session.add(application)
+            session.commit()
+            logger.info(f"Žádost {application_id} byla kompletně zpracována. Stav: {application.status.value}.")
             
         except JobContentValidationError as val_err:
 

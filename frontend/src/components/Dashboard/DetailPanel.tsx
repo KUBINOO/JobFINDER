@@ -684,12 +684,19 @@ export function DetailPanel({ job, onStatusChange, onOpenSettings }: DetailPanel
                     <Button 
                       size="lg"
                       disabled={isSending || isGenerating}
-                      onClick={() => sendEmailMutation.mutate({
-                        jobId: job.id,
-                        recipient: recipientEmail,
-                        subject: emailSubject,
-                        body: emailBody
-                      })}
+                      onClick={() => {
+                        const targetEmail = recipientEmail.trim()
+                        if (!targetEmail || !targetEmail.includes("@")) {
+                          alert("Zadejte prosím platnou e-mailovou adresu firmy / HR v poli 'Komu' před odesláním.")
+                          return
+                        }
+                        sendEmailMutation.mutate({
+                          jobId: job.id,
+                          recipient: targetEmail,
+                          subject: emailSubject,
+                          body: emailBody
+                        })
+                      }}
                       className="gap-2 px-8 bg-primary text-primary-foreground font-semibold shadow-lg hover:shadow-primary/25 hover:scale-[1.02] transition-all"
                     >
                       {isSending ? (

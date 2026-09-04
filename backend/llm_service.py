@@ -30,16 +30,30 @@ def _should_retry(exception: Exception) -> bool:
     return True
 
 class CoverLetterGenerator:
-    def __init__(self, model: Optional[str] = None, api_key: Optional[str] = None):
+    def __init__(
+        self, 
+        model: Optional[str] = None, 
+        api_key: Optional[str] = None, 
+        api_base: Optional[str] = None,
+        tone_of_voice: Optional[str] = "formal"
+    ):
         # Inicializace modelu z proměnných prostředí, výchozí je gpt-4o
         self.model = model or os.getenv("LLM_MODEL", "gpt-4o")
         self.api_key = api_key
+        self.api_base = api_base
+        self.tone_of_voice = (tone_of_voice or "formal").lower()
         
+        tone_instructions = {
+            "formal": "Tvůj tón v e-mailu musí být formální, uctivý, profesionální, zdvořilý a strukturovaný.",
+            "friendly": "Tvůj tón v e-mailu musí být přátelský, lidský, otevřený a pozitivní, ale stále vysoce kompetentní.",
+            "dynamic": "Tvůj tón v e-mailu musí být energický, dynamický, sebevědomý a přímočarý se zaměřením na přínos a tah na branku."
+        }
+        chosen_tone = tone_instructions.get(self.tone_of_voice, tone_instructions["formal"])
+
         # Systémový prompt v češtině pro striktní dodržování formátu a jazyka
         self.system_prompt = (
-            "Jsi striktní HR hodnotitel a expert na kariérní poradenství. Nejprve kriticky zhodnoť shodu uživatele s pozicí a poté pro něj napiš vysoce personalizovaný průvodní e-mail. "
-            "Tvůj tón v e-mailu musí být profesionální, zdvořilý, sebevědomý a stručný. Vyhni se klišé a zbytečné vatě. "
-            "Zni jako skutečný a velmi kompetentní člověk.\n\n"
+            f"Jsi striktní HR hodnotitel a expert na kariérní poradenství. Nejprve kriticky zhodnoť shodu uživatele s pozicí a poté pro něj napiš vysoce personalizovaný průvodní e-mail. "
+            f"{chosen_tone} Vyhni se klišé a zbytečné vatě. Zni jako skutečný a velmi schopný člověk.\n\n"
             "KRITICKÉ INSTRUKCE:\n"
             "1. HR HODNOCENÍ: Kriticky porovnej CV uživatele a popis pozice. Bodování (match_score) musí být realistické. "
             "Pokud uživateli chybí klíčová technologie nebo roky praxe, skóre MUSÍ výrazně klesnout (např. na 30-40%). Žádné umělé navyšování. "
@@ -81,16 +95,15 @@ class CoverLetterGenerator:
                     "model": self.model,
                     "messages": messages,
                     "response_format": JobAnalysisResult,
-                    "timeout": 20
+                    "timeout": 60
                 }
                 if self.api_key:
                     kwargs["api_key"] = self.api_key
+                if self.api_base:
+                    kwargs["api_base"] = self.api_base
                     
                 response = await acompletion(**kwargs)
-
                 
-                # litellm s response_format=PydanticModel zajistí JSON výstup.
-                # Zpracujeme vrácený text pro zajištění přesné shody s JobAnalysisResult.
                 content = response.choices[0].message.content
                 if not content:
                     raise ValueError("LLM vrátilo prázdný obsah odpovědi.")
@@ -102,14 +115,9 @@ class CoverLetterGenerator:
                 raise LLMGenerationError("LLM vrátilo neplatné schéma") from ve
             except Exception as e:
                 logger.error(f"Volání LLM API selhalo: {e}")
-                # Tato výjimka je zachycena knihovnou tenacity pro opakování
                 raise LLMGenerationError(f"Generování přes LLM selhalo: {e}") from e
 
     async def generate_email(self, user_cv: str, job_desc: str, job_title: str) -> JobAnalysisResult:
-        """
-        Vygeneruje návrh e-mailu pomocí specifikovaného LLM.
-        Při selhání se jednou zopakuje, poté vyvolá LLMGenerationError.
-        """
         try:
             return await self._call_llm(user_cv, job_desc, job_title)
         except Exception as e:
@@ -117,9 +125,10 @@ class CoverLetterGenerator:
             raise LLMGenerationError(f"Nepodařilo se vygenerovat e-mail: {e}") from e
 
 class JobMatcher:
-    def __init__(self, model: Optional[str] = None, api_key: Optional[str] = None):
+    def __init__(self, model: Optional[str] = None, api_key: Optional[str] = None, api_base: Optional[str] = None):
         self.model = model or os.getenv("LLM_MODEL", "gpt-4o")
         self.api_key = api_key
+        self.api_base = api_base
         self.system_prompt = (
             "Jsi striktní a objektivní HR hodnotitel a kariérní poradce. Tvým jediným úkolem je kriticky a realisticky porovnat životopis kandidáta s požadavky pracovní pozice a spočítat shodu.\n\n"
             "KRITICKÉ INSTRUKCE:\n"
@@ -155,10 +164,12 @@ class JobMatcher:
                     "model": self.model,
                     "messages": messages,
                     "response_format": JobMatchingResult,
-                    "timeout": 15
+                    "timeout": 30
                 }
                 if self.api_key:
                     kwargs["api_key"] = self.api_key
+                if self.api_base:
+                    kwargs["api_base"] = self.api_base
                     
                 response = await acompletion(**kwargs)
                 content = response.choices[0].message.content

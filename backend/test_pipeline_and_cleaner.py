@@ -186,5 +186,40 @@ class TestQualityGate(unittest.IsolatedAsyncioTestCase):
             self.assertIn("Inzerát neobsahuje čitelný popis pracovní pozice", str(ctx.exception))
 
 
+class TestFactoryFallback(unittest.TestCase):
+    def test_factory_returns_scraper_for_unknown_domain(self):
+        from factory import get_scraper
+        from scrapers.base import BaseJobScraper
+        
+        # Test unknown/corporate domains
+        domains_to_test = [
+            "https://careers.google.com/jobs/results/12345",
+            "https://www.linkedin.com/jobs/view/9999",
+            "https://rohlik.group/kariera/backend-dev",
+            "https://cez.cz/kariera/pozice"
+        ]
+        for url in domains_to_test:
+            scraper = get_scraper(url)
+            self.assertIsInstance(scraper, BaseJobScraper)
+
+class TestEmailValidation(unittest.IsolatedAsyncioTestCase):
+    async def test_run_sending_raises_on_empty_recipient(self):
+        from orchestrator import _run_sending
+        session = MagicMock()
+        application = MagicMock()
+        application.user = MagicMock()
+        application.job_posting = MagicMock()
+        
+        with patch("orchestrator.UserPreferences"):
+            with self.assertRaises(ValueError) as ctx:
+                await _run_sending(session, application, recipient_email="")
+            self.assertIn("Chybí platná e-mailová adresa příjemce", str(ctx.exception))
+
+class TestUserPreferencesModel(unittest.TestCase):
+    def test_smtp_host_field_exists(self):
+        from models import UserPreferences
+        prefs = UserPreferences(smtp_host="smtp.seznam.cz")
+        self.assertEqual(prefs.smtp_host, "smtp.seznam.cz")
+
 if __name__ == "__main__":
     unittest.main()
