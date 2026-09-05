@@ -38,6 +38,12 @@ class JobPosting(SQLModel, table=True):
     company_name: str
     description: Optional[str] = Field(default=None)
     scraped_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
+    source_portal: Optional[str] = Field(default=None)
+    employment_type: Optional[str] = Field(default=None)
+    remote_policy: Optional[str] = Field(default=None)
+    timezone_region: Optional[str] = Field(default=None)
+    canonical_hash: Optional[str] = Field(default=None)
+    salary_info: Optional[str] = Field(default=None)
 
     applications: List["Application"] = Relationship(back_populates="job_posting")
 
@@ -52,6 +58,10 @@ class Application(SQLModel, table=True):
     error_logs: Optional[str] = Field(default=None)
     match_score: Optional[int] = Field(default=None)
     match_reason: Optional[str] = Field(default=None)
+    pros: Optional[str] = Field(default=None)
+    cons: Optional[str] = Field(default=None)
+    missing_skills: Optional[str] = Field(default=None)
+    part_time_viability: Optional[str] = Field(default=None)
     created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
     updated_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
 

@@ -13,6 +13,13 @@ export interface Job {
   dateAdded: string
   match_score?: number
   match_reason?: string
+  pros?: string[]
+  cons?: string[]
+  missing_skills?: string[]
+  part_time_viability?: string
+  source_portal?: string
+  employment_type?: string
+  timezone_region?: string
   description?: string
   generated_subject?: string
   generated_body?: string
@@ -112,6 +119,37 @@ export function JobCard({ job, isSelected, onClick, onDelete }: JobCardProps) {
           </div>
         ) : null}
       </div>
+
+      {/* Štítky zdroje a úvazku */}
+      {(job.source_portal || (job.employment_type && job.employment_type !== "UNKNOWN")) && (
+        <div className="flex items-center gap-1.5 flex-wrap mb-2.5">
+          {job.source_portal && (
+            <span className={cn(
+              "text-[10px] font-semibold px-1.5 py-0.5 rounded-md",
+              isSelected ? "bg-white/20 text-white" : "bg-primary/10 text-primary"
+            )}>
+              {job.source_portal}
+            </span>
+          )}
+          {job.employment_type && job.employment_type !== "UNKNOWN" && (
+            <span className={cn(
+              "text-[10px] font-medium px-1.5 py-0.5 rounded-md",
+              isSelected ? "bg-white/20 text-white" : "bg-muted text-muted-foreground"
+            )}>
+              {job.employment_type === "PART_TIME" ? "Part-time" : job.employment_type === "CONTRACTOR_B2B" ? "B2B" : job.employment_type}
+            </span>
+          )}
+          {job.timezone_region && job.timezone_region !== "UNKNOWN" && (
+            <span className={cn(
+              "text-[10px] font-medium px-1.5 py-0.5 rounded-md",
+              isSelected ? "bg-white/20 text-white" : "bg-emerald-500/10 text-emerald-600 dark:text-emerald-400"
+            )}>
+              {job.timezone_region}
+            </span>
+          )}
+        </div>
+      )}
+
       <div className="flex items-center justify-between mt-auto">
         <span className={cn("text-sm font-medium", isSelected ? "text-primary-foreground/80" : "text-muted-foreground")}>
           {job.company}

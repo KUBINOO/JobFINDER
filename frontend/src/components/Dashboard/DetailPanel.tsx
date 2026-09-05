@@ -344,6 +344,58 @@ export function DetailPanel({ job, onStatusChange, onOpenSettings }: DetailPanel
                     {job.match_reason}
                   </div>
                 )}
+
+                {/* Detailní rozpad: PROs, CONs, Chybějící technologie */}
+                {(job.pros?.length || job.cons?.length || job.missing_skills?.length || job.part_time_viability) ? (
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 mt-3 pt-3 border-t border-border/40">
+                    {job.pros && job.pros.length > 0 && (
+                      <div className="p-3 rounded-xl bg-green-500/5 border border-green-500/15 space-y-1.5">
+                        <div className="text-xs font-bold text-green-700 dark:text-green-400 flex items-center gap-1.5">
+                          <span>✅</span> Silné stránky
+                        </div>
+                        <ul className="text-xs space-y-1 text-foreground/90 list-disc list-inside">
+                          {job.pros.map((p, idx) => (
+                            <li key={idx} className="leading-snug">{p}</li>
+                          ))}
+                        </ul>
+                      </div>
+                    )}
+
+                    {job.cons && job.cons.length > 0 && (
+                      <div className="p-3 rounded-xl bg-red-500/5 border border-red-500/15 space-y-1.5">
+                        <div className="text-xs font-bold text-red-700 dark:text-red-400 flex items-center gap-1.5">
+                          <span>⚠️</span> Rizika / Mezery
+                        </div>
+                        <ul className="text-xs space-y-1 text-foreground/90 list-disc list-inside">
+                          {job.cons.map((c, idx) => (
+                            <li key={idx} className="leading-snug">{c}</li>
+                          ))}
+                        </ul>
+                      </div>
+                    )}
+
+                    {job.missing_skills && job.missing_skills.length > 0 && (
+                      <div className="sm:col-span-2 p-3 rounded-xl bg-amber-500/5 border border-amber-500/15 space-y-1.5">
+                        <div className="text-xs font-bold text-amber-700 dark:text-amber-400">
+                          Chybějící technologie a požadavky:
+                        </div>
+                        <div className="flex flex-wrap gap-1.5 pt-0.5">
+                          {job.missing_skills.map((s, idx) => (
+                            <span key={idx} className="px-2 py-0.5 text-[11px] rounded-md bg-amber-500/10 text-amber-800 dark:text-amber-300 font-medium">
+                              {s}
+                            </span>
+                          ))}
+                        </div>
+                      </div>
+                    )}
+
+                    {job.part_time_viability && (
+                      <div className="sm:col-span-2 p-2.5 rounded-lg bg-black/5 dark:bg-white/5 text-xs text-muted-foreground">
+                        <strong className="text-foreground">Posouzení Part-time / Kontraktu:</strong> {job.part_time_viability}
+                      </div>
+                    )}
+                  </div>
+                ) : null}
               </div>
             ) : (
               /* Informační box, pokud shoda ještě nebyla spočítána */

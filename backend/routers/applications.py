@@ -25,11 +25,16 @@ class SendEmailRequest(BaseModel):
     subject: Optional[str] = None
     body: Optional[str] = None
 
+import json
+
 class ExploreRequest(BaseModel):
     count: int
     query: Optional[str] = ""
     sources: Optional[List[str]] = None
     locations: Optional[List[str]] = None
+    market: Optional[str] = "cz"  # "cz" | "global" | "hybrid"
+    employment_type: Optional[str] = "ALL"  # "ALL" | "PART_TIME" | "CONTRACTOR"
+    timezone: Optional[str] = "EMEA"  # "EMEA" | "WORLDWIDE"
 
 @router.post("/explore")
 async def explore_jobs(explore_req: ExploreRequest, background_tasks: BackgroundTasks, session: Session = Depends(get_session)):
@@ -40,6 +45,75 @@ async def explore_jobs(explore_req: ExploreRequest, background_tasks: Background
         session.commit()
         session.refresh(user)
 
+    created_apps = []
+
+    # Rozvětvení podle zvoleného trhu
+    if explore_req.market in ("global", "hybrid"):
+        from agents.dispatcher import DispatcherAgent
+        dispatcher = DispatcherAgent()
+        state = await dispatcher.execute_search(
+            query=explore_req.query or "",
+            count=explore_req.count,
+            market=explore_req.market,
+            employment_type=explore_req.employment_type or "ALL",
+            timezone_preference=explore_req.timezone or "EMEA_ONLY"
+        )
+
+        if not state.normalized_listings:
+            raise HTTPException(status_code=404, detail="Žádné relevantní globální pozice nebyly nalezeny pro zadané filtry.")
+
+        for item in state.normalized_listings:
+            job = session.exec(select(JobPosting).where(JobPosting.source_url == item.source_url)).first()
+            if not job:
+                job = JobPosting(
+                    source_url=item.source_url,
+                    title=item.title,
+                    company_name=item.company_name,
+                    description=item.description_raw,
+                    source_portal=item.source_portal,
+                    employment_type=item.employment_type.value,
+                    remote_policy=item.remote_policy.value,
+                    timezone_region=item.timezone_region.value,
+                    canonical_hash=item.canonical_id
+                )
+                session.add(job)
+                session.commit()
+                session.refresh(job)
+            else:
+                job.title = item.title
+                job.company_name = item.company_name
+                if item.description_raw:
+                    job.description = item.description_raw
+                job.source_portal = item.source_portal
+                job.employment_type = item.employment_type.value
+                job.timezone_region = item.timezone_region.value
+                session.add(job)
+                session.commit()
+
+            application = session.exec(
+                select(Application).where(Application.job_id == job.id).where(Application.user_id == user.id)
+            ).first()
+            if not application:
+                application = Application(user_id=user.id, job_id=job.id, status=ApplicationStatus.PENDING)
+            else:
+                application.status = ApplicationStatus.PENDING
+                application.error_logs = None
+
+            session.add(application)
+            session.commit()
+            session.refresh(application)
+
+            background_tasks.add_task(process_job_application, application.id)
+            created_apps.append(application.id)
+
+        return {
+            "message": f"Nalezeno {len(state.normalized_listings)} globálních pozic. Spouštím analýzu a scoring.",
+            "count": len(state.normalized_listings),
+            "urls": [item.source_url for item in state.normalized_listings],
+            "worker_metrics": state.worker_counts
+        }
+
+    # Stávající logika pro český trh
     from scrapers.search import JobSearchScraper
     async with JobSearchScraper() as scraper:
         search_results = await scraper.search_jobs(
@@ -52,15 +126,14 @@ async def explore_jobs(explore_req: ExploreRequest, background_tasks: Background
     if not search_results:
         raise HTTPException(status_code=404, detail="Žádné relevantní pozice nebyly nalezeny pro zadané klíčové slovo.")
 
-    created_apps = []
-    
     for item in search_results:
         job = session.exec(select(JobPosting).where(JobPosting.source_url == item.url)).first()
         if not job:
             job = JobPosting(
                 source_url=item.url, 
                 title=item.title or "Zatím nenačteno", 
-                company_name=item.company or "Zatím nenačteno"
+                company_name=item.company or "Zatím nenačteno",
+                source_portal=item.source or "CZ Portal"
             )
             session.add(job)
             session.commit()
@@ -70,6 +143,8 @@ async def explore_jobs(explore_req: ExploreRequest, background_tasks: Background
                 job.title = item.title
             if (not job.company_name or job.company_name in ["Zatím nenačteno", "Neznámá společnost"]) and item.company:
                 job.company_name = item.company
+            if item.source:
+                job.source_portal = item.source
             session.add(job)
             session.commit()
         
@@ -99,6 +174,20 @@ def get_applications(session: Session = Depends(get_session)):
     result = []
     for app in applications:
         job = app.job_posting
+        
+        pros_list = []
+        cons_list = []
+        skills_list = []
+        if app.pros:
+            try: pros_list = json.loads(app.pros)
+            except Exception: pros_list = [app.pros]
+        if app.cons:
+            try: cons_list = json.loads(app.cons)
+            except Exception: cons_list = [app.cons]
+        if app.missing_skills:
+            try: skills_list = json.loads(app.missing_skills)
+            except Exception: skills_list = [app.missing_skills]
+
         result.append({
             "id": str(app.id),
             "title": job.title or "Zatím nenačteno",
@@ -108,6 +197,14 @@ def get_applications(session: Session = Depends(get_session)):
             "dateAdded": app.created_at.strftime("%d.%m.%Y"),
             "match_score": app.match_score,
             "match_reason": app.match_reason,
+            "pros": pros_list,
+            "cons": cons_list,
+            "missing_skills": skills_list,
+            "part_time_viability": app.part_time_viability,
+            "source_portal": job.source_portal or "CZ Portal",
+            "employment_type": job.employment_type or "UNKNOWN",
+            "remote_policy": job.remote_policy or "UNKNOWN",
+            "timezone_region": job.timezone_region or "UNKNOWN",
             "generated_subject": app.generated_subject,
             "generated_body": app.generated_body,
             "error_logs": app.error_logs,
@@ -122,6 +219,20 @@ def get_application(app_id: int, session: Session = Depends(get_session)):
     if not app:
         raise HTTPException(status_code=404, detail="Application not found")
     job = app.job_posting
+
+    pros_list = []
+    cons_list = []
+    skills_list = []
+    if app.pros:
+        try: pros_list = json.loads(app.pros)
+        except Exception: pros_list = [app.pros]
+    if app.cons:
+        try: cons_list = json.loads(app.cons)
+        except Exception: cons_list = [app.cons]
+    if app.missing_skills:
+        try: skills_list = json.loads(app.missing_skills)
+        except Exception: skills_list = [app.missing_skills]
+
     return {
         "id": str(app.id),
         "title": job.title or "Zatím nenačteno" if job else "Zatím nenačteno",
@@ -131,6 +242,14 @@ def get_application(app_id: int, session: Session = Depends(get_session)):
         "dateAdded": app.created_at.strftime("%d.%m.%Y"),
         "match_score": app.match_score,
         "match_reason": app.match_reason,
+        "pros": pros_list,
+        "cons": cons_list,
+        "missing_skills": skills_list,
+        "part_time_viability": app.part_time_viability,
+        "source_portal": (job.source_portal if job else "CZ Portal") or "CZ Portal",
+        "employment_type": (job.employment_type if job else "UNKNOWN") or "UNKNOWN",
+        "remote_policy": (job.remote_policy if job else "UNKNOWN") or "UNKNOWN",
+        "timezone_region": (job.timezone_region if job else "UNKNOWN") or "UNKNOWN",
         "generated_subject": app.generated_subject,
         "generated_body": app.generated_body,
         "error_logs": app.error_logs,

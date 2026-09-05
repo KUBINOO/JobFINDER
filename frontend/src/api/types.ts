@@ -12,16 +12,32 @@ export enum ApplicationStatus {
   OFFER = 'OFFER',
 }
 
+export type MarketType = 'cz' | 'global' | 'hybrid';
+export type EmploymentTypeFilter = 'ALL' | 'PART_TIME' | 'CONTRACTOR';
+export type TimezoneFilter = 'EMEA' | 'WORLDWIDE' | 'ANY';
+
 export interface JobApplication {
-  id: number;
-  user_id: number;
-  job_id: number;
-  status: ApplicationStatus;
-  generated_subject: string | null;
-  generated_body: string | null;
-  error_logs: string | null;
-  created_at: string;
-  updated_at: string;
+  id: string;
+  title: string;
+  company: string;
+  description: string;
+  status: string;
+  dateAdded: string;
+  match_score?: number | null;
+  match_reason?: string | null;
+  pros?: string[];
+  cons?: string[];
+  missing_skills?: string[];
+  part_time_viability?: string | null;
+  source_portal?: string;
+  employment_type?: string;
+  remote_policy?: string;
+  timezone_region?: string;
+  generated_subject?: string | null;
+  generated_body?: string | null;
+  error_logs?: string | null;
+  url?: string;
+  source_url?: string;
 }
 
 export interface CreateApplicationPayload {
@@ -34,3 +50,14 @@ export interface CreateApplicationResponse {
   status: ApplicationStatus;
   message: string;
 }
+
+export interface ExploreRequestPayload {
+  count: number;
+  query?: string;
+  sources?: string[];
+  locations?: string[];
+  market?: MarketType;
+  employment_type?: EmploymentTypeFilter;
+  timezone?: TimezoneFilter;
+}
+

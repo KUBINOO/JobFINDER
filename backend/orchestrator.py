@@ -26,6 +26,12 @@ async def _run_scraping(session: Session, application: Application) -> None:
     Krok 1: Získání dat z pracovního inzerátu (Scraping) a validace obsahu (Quality Gate).
     """
     job = application.job_posting
+    
+    # Pokud již inzerát popis obsahuje (např. z globálních API / RSS workerů), přeskakujeme web scraping
+    if job.description and len(job.description.strip()) >= 100:
+        logger.info(f"Inzerát {job.source_url} již obsahuje stažený popis ({len(job.description)} znaků), přeskakuji scraping.")
+        return
+
     user_prefs = session.get(UserPreferences, 1)
     delay_min = user_prefs.scraper_delay_min if (user_prefs and user_prefs.scraper_delay_min is not None) else 1.0
     delay_max = user_prefs.scraper_delay_max if (user_prefs and user_prefs.scraper_delay_max is not None) else 3.0
@@ -165,9 +171,56 @@ def _get_llm_setup(session: Session, application: Application):
 
 async def _run_matching(session: Session, application: Application) -> None:
     """Samostatné rychlé vyhodnocení shody (Match score & Reason) bez generování dopisu."""
+    import json
     job = application.job_posting
     full_user_context, llm_model, api_key, ollama_host, tone_of_voice = _get_llm_setup(session, application)
     
+    # Pro globální / remote nabídky využijeme detailního CandidateFitAgenta
+    is_global_portal = bool(
+        job.source_portal and 
+        job.source_portal not in ("Jobs.cz", "Prace.cz", "StartupJobs.cz", "Profesia.cz", "Volnamista.cz")
+    )
+
+    if is_global_portal:
+        try:
+            from agents.evaluator import CandidateFitAgent
+            from schemas_v2 import JobListing, TimezoneRegion
+            
+            fit_agent = CandidateFitAgent(model=llm_model, api_key=api_key if api_key else None, api_base=ollama_host)
+            
+            # Mapování timezone regionu
+            tz_enum = TimezoneRegion.UNKNOWN
+            if job.timezone_region:
+                try:
+                    tz_enum = TimezoneRegion(job.timezone_region)
+                except ValueError:
+                    tz_enum = TimezoneRegion.UNKNOWN
+
+            stub_listing = JobListing(
+                canonical_id=job.canonical_hash or str(job.id or "unknown"),
+                source_portal=job.source_portal or "Global",
+                source_url=job.source_url,
+                title=job.title,
+                company_name=job.company_name,
+                description_raw=job.description or "",
+                timezone_region=tz_enum
+            )
+
+            fit_res = await fit_agent.evaluate_fit(stub_listing, full_user_context)
+            application.match_score = fit_res.match_score
+            application.match_reason = fit_res.fit_summary
+            application.pros = json.dumps(fit_res.pros, ensure_ascii=False)
+            application.cons = json.dumps(fit_res.cons, ensure_ascii=False)
+            application.missing_skills = json.dumps(fit_res.missing_skills, ensure_ascii=False)
+            application.part_time_viability = fit_res.part_time_viability
+            
+            session.add(application)
+            session.commit()
+            return
+        except Exception as e:
+            logger.warning(f"CandidateFitAgent selhal, zkouším fallback na JobMatcher: {e}")
+
+    # Fallback / Stávající vyhodnocení pro české portály
     matcher = JobMatcher(model=llm_model, api_key=api_key if api_key else None, api_base=ollama_host)
     res = await matcher.evaluate_match(
         user_cv=full_user_context,

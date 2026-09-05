@@ -44,7 +44,7 @@ export const useApplicationStatus = (applicationId: string | number | null) => {
       ];
       
       // Poll every 2 seconds if active, else return false to STOP polling immediately
-      return activeStatuses.includes(data.status) ? 2000 : false;
+      return activeStatuses.includes(data.status as ApplicationStatus) ? 2000 : false;
     },
   });
 };
