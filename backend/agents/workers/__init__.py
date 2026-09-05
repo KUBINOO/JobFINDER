@@ -4,6 +4,7 @@ from .remotive import RemotiveWorker
 from .wwr import WeWorkRemotelyWorker
 from .arbeitnow import ArbeitnowWorker
 from .jobicy import JobicyWorker
+from .jobspy_worker import JobSpyWorker
 
 __all__ = [
     "BaseRemoteWorker",
@@ -12,4 +13,5 @@ __all__ = [
     "WeWorkRemotelyWorker",
     "ArbeitnowWorker",
     "JobicyWorker",
+    "JobSpyWorker",
 ]

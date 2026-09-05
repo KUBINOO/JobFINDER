@@ -35,9 +35,28 @@ export interface JobApplication {
   timezone_region?: string;
   generated_subject?: string | null;
   generated_body?: string | null;
+  outreach_message?: string | null;
+  tailored_cv_path?: string | null;
   error_logs?: string | null;
   url?: string;
   source_url?: string;
+}
+
+export interface CvGenerateResponsePayload {
+  status: string;
+  file_path: string;
+  page_count: number;
+  filename: string;
+}
+
+export interface OutreachRequestPayload {
+  custom_focus?: string;
+}
+
+export interface OutreachResponsePayload {
+  outreach_message: string;
+  word_count: number;
+  application_id: number;
 }
 
 export interface CreateApplicationPayload {

@@ -1,7 +1,11 @@
 from fastapi import APIRouter, Depends, HTTPException, BackgroundTasks
+from fastapi.responses import FileResponse
 from sqlmodel import Session, select
 from typing import List, Optional
 from pydantic import BaseModel
+import os
+import re
+import unicodedata
 from database import get_session
 from models import Application, JobPosting, ApplicationStatus, User
 from orchestrator import (
@@ -24,6 +28,23 @@ class SendEmailRequest(BaseModel):
     recipient_email: Optional[str] = None
     subject: Optional[str] = None
     body: Optional[str] = None
+
+class OutreachRequest(BaseModel):
+    custom_focus: Optional[str] = None
+
+class OutreachResponse(BaseModel):
+    outreach_message: str
+    word_count: int
+    application_id: int
+
+class CvGenerateResponse(BaseModel):
+    status: str
+    file_path: str
+    page_count: int
+    filename: str
+
+from services.outreach_service import generate_and_save_cold_outreach
+from services.cv_generator import generate_tailored_cv_for_application
 
 import json
 
@@ -207,6 +228,8 @@ def get_applications(session: Session = Depends(get_session)):
             "timezone_region": job.timezone_region or "UNKNOWN",
             "generated_subject": app.generated_subject,
             "generated_body": app.generated_body,
+            "outreach_message": app.outreach_message,
+            "tailored_cv_path": app.tailored_cv_path,
             "error_logs": app.error_logs,
             "url": job.source_url if job else "",
             "source_url": job.source_url if job else "",
@@ -252,6 +275,8 @@ def get_application(app_id: int, session: Session = Depends(get_session)):
         "timezone_region": (job.timezone_region if job else "UNKNOWN") or "UNKNOWN",
         "generated_subject": app.generated_subject,
         "generated_body": app.generated_body,
+        "outreach_message": app.outreach_message,
+        "tailored_cv_path": app.tailored_cv_path,
         "error_logs": app.error_logs,
         "url": job.source_url if job else "",
         "source_url": job.source_url if job else "",
@@ -364,6 +389,71 @@ async def send_email_for_application(app_id: int, send_req: Optional[SendEmailRe
         return {"message": "E-mail byl úspěšně odeslán přes SMTP.", "status": "Sent"}
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
+
+@router.post("/{app_id}/outreach", response_model=OutreachResponse)
+async def generate_outreach_for_application(
+    app_id: int, 
+    outreach_req: Optional[OutreachRequest] = None, 
+    session: Session = Depends(get_session)
+):
+    application = session.get(Application, app_id)
+    if not application:
+        raise HTTPException(status_code=404, detail="Application not found")
+
+    custom_focus = outreach_req.custom_focus if outreach_req else None
+    result = await generate_and_save_cold_outreach(
+        session=session,
+        application=application,
+        custom_focus=custom_focus
+    )
+    return result
+
+@router.post("/{app_id}/cv/generate", response_model=CvGenerateResponse)
+def generate_cv_for_application(app_id: int, session: Session = Depends(get_session)):
+    application = session.get(Application, app_id)
+    if not application:
+        raise HTTPException(status_code=404, detail="Žádost nebyla nalezena")
+
+    try:
+        result = generate_tailored_cv_for_application(session=session, application_id=app_id)
+        return result
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Chyba při generování ATS CV: {str(e)}")
+
+@router.get("/{app_id}/cv/download")
+def download_cv_for_application(app_id: int, session: Session = Depends(get_session)):
+    application = session.get(Application, app_id)
+    if not application:
+        raise HTTPException(status_code=404, detail="Žádost nebyla nalezena")
+
+    target_file = application.tailored_cv_path
+    full_path = None
+    if target_file:
+        if os.path.isabs(target_file):
+            full_path = target_file
+        else:
+            base_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+            full_path = os.path.join(base_dir, target_file)
+
+    if not full_path or not os.path.exists(full_path):
+        try:
+            res = generate_tailored_cv_for_application(session=session, application_id=app_id)
+            full_path = res["file_path"]
+        except Exception as e:
+            raise HTTPException(status_code=500, detail=f"Chyba při generování ATS CV: {str(e)}")
+
+    job = application.job_posting
+    company_raw = (job.company_name if job and job.company_name else "Company").strip()
+    normalized_company = unicodedata.normalize('NFKD', company_raw).encode('ascii', 'ignore').decode('ascii')
+    company_slug = re.sub(r'[^a-zA-Z0-9_\-]', '', normalized_company.replace(" ", "_")) or "Company"
+    filename = f"CV_Jakub_Slavik_{company_slug}.pdf"
+
+    return FileResponse(
+        path=full_path,
+        media_type="application/pdf",
+        filename=filename,
+        headers={"Content-Disposition": f'attachment; filename="{filename}"'}
+    )
 
 @router.delete("/action/wipe")
 def wipe_applications(session: Session = Depends(get_session)):

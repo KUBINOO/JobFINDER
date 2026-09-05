@@ -1,4 +1,5 @@
-from pydantic import BaseModel, HttpUrl
+from typing import Optional, List
+from pydantic import BaseModel, HttpUrl, Field
 
 class ScrapedJob(BaseModel):
     source_url: HttpUrl
@@ -9,6 +10,8 @@ class ScrapedJob(BaseModel):
 class JobMatchingResult(BaseModel):
     match_score: int
     match_reason: str
+    pros: List[str] = Field(default_factory=list, description="3 klíčové důvody shody (PROs)")
+    cons: List[str] = Field(default_factory=list, description="Klíčová rizika nebo chybějící požadavky (CONs)")
 
 class JobAnalysisResult(BaseModel):
     match_score: int

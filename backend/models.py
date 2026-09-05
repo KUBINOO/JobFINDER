@@ -55,6 +55,8 @@ class Application(SQLModel, table=True):
     status: ApplicationStatus = Field(default=ApplicationStatus.PENDING)
     generated_subject: Optional[str] = Field(default=None)
     generated_body: Optional[str] = Field(default=None)
+    outreach_message: Optional[str] = Field(default=None, nullable=True)
+    tailored_cv_path: Optional[str] = Field(default=None, nullable=True)
     error_logs: Optional[str] = Field(default=None)
     match_score: Optional[int] = Field(default=None)
     match_reason: Optional[str] = Field(default=None)

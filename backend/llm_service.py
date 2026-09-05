@@ -134,7 +134,9 @@ class JobMatcher:
             "KRITICKÉ INSTRUKCE:\n"
             "1. HODNOCENÍ (match_score): Celé číslo v rozsahu 0 až 100 vyjadřující realistickou shodu. Pokud kandidátovi chybí klíčové technologie, praxe nebo oborové vzdělání, skóre MUSÍ znatelně klesnout (např. na 25-45%). Žádné umělé lichocení.\n"
             "2. ZDŮVODNĚNÍ (match_reason): Maximálně 1 až 2 věty v češtině shrnující hlavní silné stránky a chybějící požadavky.\n"
-            "3. Výstup musí být striktně ve formátu JSON odpovídajícím schématu."
+            "3. VÝHODY (pros): Seznam přesně 3 klíčových důvodů shody (silné stránky kandidáta a splněné požadavky pro tuto pozici).\n"
+            "4. RIZIKA (cons): Seznam 2-3 rizik nebo chybějících požadavků.\n"
+            "5. Výstup musí být striktně ve formátu JSON odpovídajícím schématu."
         )
 
     @retry(
@@ -148,7 +150,7 @@ class JobMatcher:
             f"NÁZEV POZICE: {job_title}\n\n"
             f"POPIS POZICE:\n{job_desc}\n\n"
             f"CV A PROFIL KANDIDÁTA:\n{user_cv}\n\n"
-            "Vyhodnoť shodu kandidáta s touto pozicí a vrať JSON s match_score a match_reason."
+            "Vyhodnoť shodu kandidáta s touto pozicí a vrať JSON s match_score, match_reason, pros (přesně 3 klíčové důvody shody) a cons."
         )
 
         messages = [

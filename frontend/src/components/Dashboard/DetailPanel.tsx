@@ -20,7 +20,11 @@ import {
   Check,
   AlertTriangle,
   Key,
-  Settings
+  Settings,
+  Copy,
+  FileText,
+  MessageSquare,
+  Download
 } from "lucide-react"
 import { cn } from "../../lib/utils"
 import { useMutation, useQueryClient } from "@tanstack/react-query"
@@ -30,7 +34,7 @@ import { useSettings } from "../../hooks/useSettings"
 const API_BASE = "http://localhost:8000/api"
 
 interface DetailPanelProps {
-  job: Job | null;
+  job: (Job & { outreach_message?: string | null }) | null;
   onStatusChange: (jobId: string, newStatus: JobStatus) => void;
   onOpenSettings?: (tab?: string) => void;
 }
@@ -59,6 +63,13 @@ export function DetailPanel({ job, onStatusChange, onOpenSettings }: DetailPanel
   const [emailBody, setEmailBody] = useState("")
   const [copied, setCopied] = useState(false)
 
+  type CopilotTab = "email" | "outreach" | "cv"
+  const [copilotTab, setCopilotTab] = useState<CopilotTab>("email")
+  const [outreachMessage, setOutreachMessage] = useState("")
+  const [customFocus, setCustomFocus] = useState("")
+  const [outreachCopied, setOutreachCopied] = useState(false)
+  const [isDownloadingCv, setIsDownloadingCv] = useState(false)
+
   const hasCv = Boolean(settings?.cv_file_path)
   const hasProfile = Boolean(settings?.full_name || settings?.industry || settings?.education)
   const isOllama = settings?.llm_provider === "Ollama"
@@ -73,8 +84,9 @@ export function DetailPanel({ job, onStatusChange, onOpenSettings }: DetailPanel
     if (job) {
       setEmailSubject(job.generated_subject || `Zájem o pozici: ${job.title}`)
       setEmailBody(job.generated_body || "")
+      setOutreachMessage((job as any).outreach_message || "")
     }
-  }, [job?.id, job?.generated_body, job?.generated_subject])
+  }, [job?.id, job?.generated_body, job?.generated_subject, (job as any)?.outreach_message])
 
   useEffect(() => {
     setRecipientEmail("")
@@ -132,6 +144,64 @@ export function DetailPanel({ job, onStatusChange, onOpenSettings }: DetailPanel
     }
   })
 
+  // Mutace pro AI generování cold outreach zprávy pro Hiring Managera
+  const outreachMutation = useMutation({
+    mutationFn: async ({ jobId, focus }: { jobId: string; focus?: string }) => {
+      const res = await axios.post(`${API_BASE}/applications/${jobId}/outreach`, {
+        custom_focus: focus?.trim() || undefined
+      })
+      return res.data
+    },
+    onSuccess: (data) => {
+      if (data?.outreach_message) {
+        setOutreachMessage(data.outreach_message)
+      }
+      queryClient.invalidateQueries({ queryKey: ["jobs"] })
+    },
+    onError: (err: any) => {
+      alert("Chyba při generování cold outreach zprávy: " + (err.response?.data?.detail || err.message))
+    }
+  })
+
+  // Stažení a vygenerování 1-stránkového ATS CV na míru (PDF)
+  const handleDownloadTailoredCv = async () => {
+    if (!job) return
+    setIsDownloadingCv(true)
+    try {
+      // 1. Zavoláme vygenerování CV
+      const genRes = await axios.post(`${API_BASE}/applications/${job.id}/cv/generate`, {}, {
+        timeout: 45000
+      })
+      const defaultFilename = `CV_Jakub_Slavik_${job.company.replace(/[^a-zA-Z0-9]/g, '_')}.pdf`
+      const filename = genRes.data?.filename || defaultFilename
+
+      // 2. Stáhneme binární blob souboru
+      const dlRes = await axios.get(`${API_BASE}/applications/${job.id}/cv/download`, {
+        responseType: "blob",
+        timeout: 45000
+      })
+
+      // 3. Automatické 1-kliknutí stažení v prohlížeči
+      const blob = new Blob([dlRes.data], { type: "application/pdf" })
+      const blobUrl = window.URL.createObjectURL(blob)
+      const link = document.createElement("a")
+      link.href = blobUrl
+      link.download = filename
+      document.body.appendChild(link)
+      link.click()
+      document.body.removeChild(link)
+      window.URL.revokeObjectURL(blobUrl)
+
+      // Invalidate queries pro aktualizaci tailored_cv_path
+      queryClient.invalidateQueries({ queryKey: ["jobs"] })
+    } catch (err: any) {
+      console.error("Chyba při stahování ATS CV:", err)
+      alert("Nepodařilo se vygenerovat či stáhnout ATS CV: " + (err.response?.data?.detail || err.message || "Neznámá chyba"))
+    } finally {
+      setIsDownloadingCv(false)
+    }
+  }
+
   if (!job) {
     return (
       <div className="flex-1 flex items-center justify-center text-muted-foreground h-full">
@@ -148,6 +218,18 @@ export function DetailPanel({ job, onStatusChange, onOpenSettings }: DetailPanel
   const isSending = job.status === "Sending" || sendEmailMutation.isPending
   const hasGeneratedEmail = Boolean(job.generated_body || emailBody)
   const isSent = job.status === "Sent"
+
+  const outreachWords = outreachMessage.trim() ? outreachMessage.trim().split(/\s+/).length : 0
+  const isWordCountInRange = outreachWords >= 100 && outreachWords <= 160
+  const isOutreachGenerating = outreachMutation.isPending
+  const hasGeneratedOutreach = Boolean((job as any)?.outreach_message || outreachMessage)
+
+  const handleCopyOutreach = () => {
+    if (!outreachMessage) return
+    navigator.clipboard.writeText(outreachMessage)
+    setOutreachCopied(true)
+    setTimeout(() => setOutreachCopied(false), 2000)
+  }
 
   const hasScore = typeof job.match_score === "number" && job.match_score !== null
 
@@ -516,249 +598,576 @@ export function DetailPanel({ job, onStatusChange, onOpenSettings }: DetailPanel
               </div>
             </section>
             
-            {/* SEKCE 2: AI GENEROVÁNÍ A SMTP STRUKTURA E-MAILU */}
+            {/* SEKCE 2: KARIÉRNÍ COPILOT S 3 ZÁLOŽKAMI */}
             <section className="pt-4">
-              <div className="flex items-center justify-between mb-6 border-b border-black/5 dark:border-white/5 pb-2">
+              {/* LIŠTA ZÁLOŽEK COPILOTU */}
+              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 mb-6 border-b border-black/10 dark:border-white/10 pb-3">
                 <div className="flex items-center gap-2">
-                  <Mail className="w-5 h-5 text-primary" />
-                  <h3 className="text-xl font-semibold">Motivační e-mail a odeslání</h3>
+                  <Sparkles className="w-5 h-5 text-primary" />
+                  <h3 className="text-xl font-semibold">Kariérní Copilot</h3>
                 </div>
-                
-                {hasGeneratedEmail && (
-                  <Button 
-                    variant="ghost" 
-                    size="sm" 
-                    disabled={isGenerating || isSending}
-                    onClick={() => generateMutation.mutate(job.id)}
-                    className="h-8 gap-1.5 text-primary hover:text-primary hover:bg-primary/10"
-                  >
-                    {isGenerating ? (
-                      <Loader2 className="w-3.5 h-3.5 animate-spin" />
-                    ) : (
-                      <Sparkles className="w-3.5 h-3.5" />
+
+                <div className="flex items-center gap-1.5 p-1 bg-black/5 dark:bg-white/5 rounded-xl border border-black/5 dark:border-white/5">
+                  <button
+                    type="button"
+                    onClick={() => setCopilotTab("email")}
+                    className={cn(
+                      "flex items-center gap-2 px-3.5 py-1.5 rounded-lg text-xs font-semibold transition-all cursor-pointer",
+                      copilotTab === "email"
+                        ? "bg-white dark:bg-zinc-800 text-foreground shadow-sm"
+                        : "text-muted-foreground hover:text-foreground"
                     )}
-                    Přegenerovat s AI
-                  </Button>
-                )}
+                  >
+                    <Mail className="w-3.5 h-3.5" />
+                    <span>E-mail na HR</span>
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={() => setCopilotTab("outreach")}
+                    className={cn(
+                      "flex items-center gap-2 px-3.5 py-1.5 rounded-lg text-xs font-semibold transition-all cursor-pointer",
+                      copilotTab === "outreach"
+                        ? "bg-white dark:bg-zinc-800 text-foreground shadow-sm"
+                        : "text-muted-foreground hover:text-foreground"
+                    )}
+                  >
+                    <MessageSquare className="w-3.5 h-3.5 text-primary" />
+                    <span>Cold Outreach</span>
+                    {Boolean((job as any)?.outreach_message || outreachMessage) && (
+                      <span className="w-1.5 h-1.5 rounded-full bg-primary" />
+                    )}
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={() => setCopilotTab("cv")}
+                    className={cn(
+                      "flex items-center gap-2 px-3.5 py-1.5 rounded-lg text-xs font-semibold transition-all cursor-pointer",
+                      copilotTab === "cv"
+                        ? "bg-white dark:bg-zinc-800 text-foreground shadow-sm"
+                        : "text-muted-foreground hover:text-foreground"
+                    )}
+                  >
+                    <FileText className="w-3.5 h-3.5 text-amber-500" />
+                    <span>ATS CV na míru</span>
+                    {Boolean((job as any)?.tailored_cv_path) && (
+                      <span className="w-1.5 h-1.5 rounded-full bg-amber-500" />
+                    )}
+                  </button>
+                </div>
               </div>
 
-              {/* STAV 1: Probíhá generování AI */}
-              {isGenerating ? (
-                <div className="p-8 rounded-2xl border border-primary/30 bg-primary/5 dark:bg-primary/10 flex flex-col items-center justify-center text-center gap-4 py-16 animate-pulse">
-                  <div className="w-14 h-14 rounded-2xl bg-primary/20 flex items-center justify-center text-primary shadow-inner">
-                    <Loader2 className="w-7 h-7 animate-spin" />
-                  </div>
-                  <div>
-                    <h4 className="font-bold text-lg">AI analyzuje pozici a váš životopis...</h4>
-                    <p className="text-sm text-muted-foreground mt-1 max-w-md">
-                      Porovnáváme klíčová slova, vytváříme personalizované argumenty a sestavujeme profesionální e-mail.
-                    </p>
-                  </div>
-                </div>
-              ) : !hasGeneratedEmail ? (
-                /* STAV 2: E-mail ještě nebyl vygenerován -> Tlačítko pro spuštění AI generování */
-                <div className="p-8 rounded-2xl border border-white/20 bg-white/40 dark:bg-black/30 flex flex-col items-center justify-center text-center gap-5 py-12 shadow-sm backdrop-blur-xl">
-                  <div className="w-14 h-14 rounded-2xl bg-primary/10 flex items-center justify-center text-primary shadow-sm">
-                    <Sparkles className="w-7 h-7" />
-                  </div>
-                  <div className="max-w-md">
-                    <h4 className="font-bold text-xl mb-1">Generování motivačního e-mailu pomocí AI</h4>
-                    <p className="text-sm text-muted-foreground leading-relaxed">
-                      AI prostuduje požadavky tohoto inzerátu, porovná je s vaším životopisem, spočítá shodu a vytvoří personalizovaný text e-mailu.
-                    </p>
+              {/* OBSAH ZÁLOŽKY 1: E-MAIL NA HR */}
+              {copilotTab === "email" && (
+                <div>
+                  <div className="flex items-center justify-between mb-6 border-b border-black/5 dark:border-white/5 pb-2">
+                    <div className="flex items-center gap-2">
+                      <Mail className="w-5 h-5 text-primary" />
+                      <h3 className="text-xl font-semibold">Motivační e-mail a odeslání</h3>
+                    </div>
+                    
+                    {hasGeneratedEmail && (
+                      <Button 
+                        variant="ghost" 
+                        size="sm" 
+                        disabled={isGenerating || isSending}
+                        onClick={() => generateMutation.mutate(job.id)}
+                        className="h-8 gap-1.5 text-primary hover:text-primary hover:bg-primary/10"
+                      >
+                        {isGenerating ? (
+                          <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                        ) : (
+                          <Sparkles className="w-3.5 h-3.5" />
+                        )}
+                        Přegenerovat s AI
+                      </Button>
+                    )}
                   </div>
 
-                  {!hasValidConfig ? (
-                    <div className="w-full max-w-md p-4 rounded-xl border border-amber-500/30 bg-amber-500/10 text-left space-y-3 text-xs">
-                      <div className="flex items-center gap-2 font-semibold text-amber-900 dark:text-amber-200">
-                        <AlertTriangle className="w-4 h-4 text-amber-600 dark:text-amber-400 shrink-0" />
-                        <span>Před generováním je nutné doplnit údaje v Nastavení:</span>
+                  {/* STAV 1: Probíhá generování AI */}
+                  {isGenerating ? (
+                    <div className="p-8 rounded-2xl border border-primary/30 bg-primary/5 dark:bg-primary/10 flex flex-col items-center justify-center text-center gap-4 py-16 animate-pulse">
+                      <div className="w-14 h-14 rounded-2xl bg-primary/20 flex items-center justify-center text-primary shadow-inner">
+                        <Loader2 className="w-7 h-7 animate-spin" />
                       </div>
-                      <div className="space-y-2">
-                        {isMissingCv && (
-                          <div className="flex items-center justify-between bg-white/50 dark:bg-black/40 p-2 rounded-lg">
-                            <span className="text-muted-foreground">📄 Životopis (CV v PDF)</span>
-                            {onOpenSettings && (
-                              <Button 
-                                size="sm" 
-                                variant="outline" 
-                                onClick={() => onOpenSettings("profile")} 
-                                className="h-6 text-[11px] px-2 font-semibold text-primary"
-                              >
-                                Nahrát CV
-                              </Button>
-                            )}
-                          </div>
-                        )}
-                        {isMissingKey && (
-                          <div className="flex items-center justify-between bg-white/50 dark:bg-black/40 p-2 rounded-lg">
-                            <span className="text-muted-foreground">🔑 Platný AI API klíč ({settings?.llm_provider || "AI"})</span>
-                            {onOpenSettings && (
-                              <Button 
-                                size="sm" 
-                                variant="outline" 
-                                onClick={() => onOpenSettings("ai")} 
-                                className="h-6 text-[11px] px-2 font-semibold text-primary"
-                              >
-                                Nastavit klíč
-                              </Button>
-                            )}
-                          </div>
-                        )}
+                      <div>
+                        <h4 className="font-bold text-lg">AI analyzuje pozici a váš životopis...</h4>
+                        <p className="text-sm text-muted-foreground mt-1 max-w-md">
+                          Porovnáváme klíčová slova, vytváříme personalizované argumenty a sestavujeme profesionální e-mail.
+                        </p>
                       </div>
                     </div>
-                  ) : null}
+                  ) : !hasGeneratedEmail ? (
+                    /* STAV 2: E-mail ještě nebyl vygenerován -> Tlačítko pro spuštění AI generování */
+                    <div className="p-8 rounded-2xl border border-white/20 bg-white/40 dark:bg-black/30 flex flex-col items-center justify-center text-center gap-5 py-12 shadow-sm backdrop-blur-xl">
+                      <div className="w-14 h-14 rounded-2xl bg-primary/10 flex items-center justify-center text-primary shadow-sm">
+                        <Sparkles className="w-7 h-7" />
+                      </div>
+                      <div className="max-w-md">
+                        <h4 className="font-bold text-xl mb-1">Generování motivačního e-mailu pomocí AI</h4>
+                        <p className="text-sm text-muted-foreground leading-relaxed">
+                          AI prostuduje požadavky tohoto inzerátu, porovná je s vaším životopisem, spočítá shodu a vytvoří personalizovaný text e-mailu.
+                        </p>
+                      </div>
 
-                  <Button 
-                    size="lg"
-                    onClick={() => {
-                      if (!hasValidConfig && onOpenSettings) {
-                        onOpenSettings(isMissingCv ? "profile" : "ai")
-                        return
-                      }
-                      generateMutation.mutate(job.id)
-                    }}
-                    className="gap-2 px-8 h-12 text-base font-semibold shadow-lg hover:shadow-primary/25 hover:scale-[1.02] transition-all bg-primary text-primary-foreground"
-                  >
-                    <Sparkles className="w-5 h-5" />
-                    {hasValidConfig ? "Vygenerovat e-mail pomocí AI" : "Doplnit nastavení pro AI"}
-                  </Button>
-                </div>
-              ) : (
-                /* STAV 3: E-mail je vygenerován -> Zobrazení kompletní SMTP struktury a editoru */
-                <div className="space-y-6">
-                  {/* SMTP STRUKTURA HLAVIČKY */}
-                  <div className="p-5 rounded-2xl border border-white/20 bg-white/60 dark:bg-black/40 backdrop-blur-xl shadow-sm space-y-4">
-                    <div className="text-xs font-semibold text-muted-foreground uppercase tracking-wider mb-2 flex items-center gap-1.5">
-                      <AtSign className="w-3.5 h-3.5" />
-                      <span>SMTP Parametry zprávy</span>
+                      {!hasValidConfig ? (
+                        <div className="w-full max-w-md p-4 rounded-xl border border-amber-500/30 bg-amber-500/10 text-left space-y-3 text-xs">
+                          <div className="flex items-center gap-2 font-semibold text-amber-900 dark:text-amber-200">
+                            <AlertTriangle className="w-4 h-4 text-amber-600 dark:text-amber-400 shrink-0" />
+                            <span>Před generováním je nutné doplnit údaje v Nastavení:</span>
+                          </div>
+                          <div className="space-y-2">
+                            {isMissingCv && (
+                              <div className="flex items-center justify-between bg-white/50 dark:bg-black/40 p-2 rounded-lg">
+                                <span className="text-muted-foreground">📄 Životopis (CV v PDF)</span>
+                                {onOpenSettings && (
+                                  <Button 
+                                    size="sm" 
+                                    variant="outline" 
+                                    onClick={() => onOpenSettings("profile")} 
+                                    className="h-6 text-[11px] px-2 font-semibold text-primary"
+                                  >
+                                    Nahrát CV
+                                  </Button>
+                                )}
+                              </div>
+                            )}
+                            {isMissingKey && (
+                              <div className="flex items-center justify-between bg-white/50 dark:bg-black/40 p-2 rounded-lg">
+                                <span className="text-muted-foreground">🔑 Platný AI API klíč ({settings?.llm_provider || "AI"})</span>
+                                {onOpenSettings && (
+                                  <Button 
+                                    size="sm" 
+                                    variant="outline" 
+                                    onClick={() => onOpenSettings("ai")} 
+                                    className="h-6 text-[11px] px-2 font-semibold text-primary"
+                                  >
+                                    Nastavit klíč
+                                  </Button>
+                                )}
+                              </div>
+                            )}
+                          </div>
+                        </div>
+                      ) : null}
+
+                      <Button 
+                        size="lg"
+                        onClick={() => {
+                          if (!hasValidConfig && onOpenSettings) {
+                            onOpenSettings(isMissingCv ? "profile" : "ai")
+                            return
+                          }
+                          generateMutation.mutate(job.id)
+                        }}
+                        className="gap-2 px-8 h-12 text-base font-semibold shadow-lg hover:shadow-primary/25 hover:scale-[1.02] transition-all bg-primary text-primary-foreground"
+                      >
+                        <Sparkles className="w-5 h-5" />
+                        {hasValidConfig ? "Vygenerovat e-mail pomocí AI" : "Doplnit nastavení pro AI"}
+                      </Button>
                     </div>
+                  ) : (
+                    /* STAV 3: E-mail je vygenerován -> Zobrazení kompletní SMTP struktury a editoru */
+                    <div className="space-y-6">
+                      {/* SMTP STRUKTURA HLAVIČKY */}
+                      <div className="p-5 rounded-2xl border border-white/20 bg-white/60 dark:bg-black/40 backdrop-blur-xl shadow-sm space-y-4">
+                        <div className="text-xs font-semibold text-muted-foreground uppercase tracking-wider mb-2 flex items-center gap-1.5">
+                          <AtSign className="w-3.5 h-3.5" />
+                          <span>SMTP Parametry zprávy</span>
+                        </div>
 
-                    <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                      {/* ODESÍLATEL (FROM) */}
-                      <div className="space-y-1.5">
-                        <label className="text-xs font-semibold text-muted-foreground flex items-center gap-1.5">
-                          <User className="w-3.5 h-3.5 text-primary" />
-                          <span>Od (Váš SMTP účet):</span>
-                        </label>
-                        <div className="flex items-center justify-between p-2.5 rounded-xl bg-white/50 dark:bg-black/30 border border-white/10 text-sm">
-                          <span className="font-medium truncate text-foreground">{settings?.smtp_email || "Nenastaveno v nastavení"}</span>
-                          <span className="inline-flex items-center gap-1 text-[11px] px-2 py-0.5 rounded-full bg-green-500/10 text-green-600 dark:text-green-400 font-medium shrink-0">
-                            <span className="w-1.5 h-1.5 rounded-full bg-green-500 animate-pulse"></span>
-                            SMTP Aktivní
+                        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                          {/* ODESÍLATEL (FROM) */}
+                          <div className="space-y-1.5">
+                            <label className="text-xs font-semibold text-muted-foreground flex items-center gap-1.5">
+                              <User className="w-3.5 h-3.5 text-primary" />
+                              <span>Od (Váš SMTP účet):</span>
+                            </label>
+                            <div className="flex items-center justify-between p-2.5 rounded-xl bg-white/50 dark:bg-black/30 border border-white/10 text-sm">
+                              <span className="font-medium truncate text-foreground">{settings?.smtp_email || "Nenastaveno v nastavení"}</span>
+                              <span className="inline-flex items-center gap-1 text-[11px] px-2 py-0.5 rounded-full bg-green-500/10 text-green-600 dark:text-green-400 font-medium shrink-0">
+                                <span className="w-1.5 h-1.5 rounded-full bg-green-500 animate-pulse"></span>
+                                SMTP Aktivní
+                              </span>
+                            </div>
+                          </div>
+
+                          {/* PŘÍJEMCE (TO / HR) */}
+                          <div className="space-y-1.5">
+                            <label className="text-xs font-semibold text-muted-foreground flex items-center gap-1.5">
+                              <Mail className="w-3.5 h-3.5 text-primary" />
+                              <span>Komu (E-mail na HR / Firmu):</span>
+                            </label>
+                            <Input 
+                              placeholder={`napr. kariera@${job.company.toLowerCase().replace(/[^a-z0-9]/g, '') || "firma"}.cz`}
+                              value={recipientEmail}
+                              onChange={(e) => setRecipientEmail(e.target.value)}
+                              className="bg-white/50 dark:bg-black/30 border-white/10 text-sm h-10"
+                            />
+                          </div>
+                        </div>
+
+                        {/* PŘÍLOHA CV */}
+                        <div className="pt-2 border-t border-black/5 dark:border-white/5 flex flex-wrap items-center justify-between gap-2 text-xs">
+                          <div className="flex items-center gap-2 text-muted-foreground">
+                            <Paperclip className="w-3.5 h-3.5 text-primary" />
+                            <span className="font-medium text-foreground">Přiložený životopis:</span>
+                            <span className="px-2.5 py-1 rounded-lg bg-black/5 dark:bg-white/10 font-mono text-foreground font-semibold">
+                              📄 {cvFileName}
+                            </span>
+                          </div>
+                          <span className="text-muted-foreground italic text-[11px]">
+                            (Automaticky se odešle jako PDF příloha přes SMTP)
                           </span>
                         </div>
                       </div>
 
-                      {/* PŘÍJEMCE (TO / HR) */}
-                      <div className="space-y-1.5">
-                        <label className="text-xs font-semibold text-muted-foreground flex items-center gap-1.5">
-                          <Mail className="w-3.5 h-3.5 text-primary" />
-                          <span>Komu (E-mail na HR / Firmu):</span>
+                      {/* PŘEDMĚT E-MAILU */}
+                      <div className="space-y-2">
+                        <label className="text-sm font-semibold flex items-center justify-between">
+                          <span>Předmět e-mailu</span>
+                          <span className="text-xs text-muted-foreground font-normal">Předmět zprávy</span>
                         </label>
                         <Input 
-                          placeholder={`napr. kariera@${job.company.toLowerCase().replace(/[^a-z0-9]/g, '') || "firma"}.cz`}
-                          value={recipientEmail}
-                          onChange={(e) => setRecipientEmail(e.target.value)}
-                          className="bg-white/50 dark:bg-black/30 border-white/10 text-sm h-10"
+                          value={emailSubject}
+                          onChange={(e) => setEmailSubject(e.target.value)}
+                          className="bg-white/50 dark:bg-black/30 text-base py-3 h-auto border-white/20 font-medium" 
                         />
                       </div>
-                    </div>
 
-                    {/* PŘÍLOHA CV */}
-                    <div className="pt-2 border-t border-black/5 dark:border-white/5 flex flex-wrap items-center justify-between gap-2 text-xs">
-                      <div className="flex items-center gap-2 text-muted-foreground">
-                        <Paperclip className="w-3.5 h-3.5 text-primary" />
-                        <span className="font-medium text-foreground">Přiložený životopis:</span>
-                        <span className="px-2.5 py-1 rounded-lg bg-black/5 dark:bg-white/10 font-mono text-foreground font-semibold">
-                          📄 {cvFileName}
-                        </span>
+                      {/* TĚLO E-MAILU */}
+                      <div className="space-y-2">
+                        <div className="flex items-center justify-between">
+                          <label className="text-sm font-semibold">Tělo e-mailu (Upravte dle potřeby)</label>
+                          <button
+                            type="button"
+                            onClick={handleCopyBody}
+                            className="text-xs text-primary hover:underline inline-flex items-center gap-1 font-medium"
+                          >
+                            {copied ? <Check className="w-3 h-3 text-green-500" /> : null}
+                            {copied ? "Zkopírováno!" : "Kopírovat text"}
+                          </button>
+                        </div>
+                        <Textarea 
+                          value={emailBody} 
+                          onChange={(e) => setEmailBody(e.target.value)}
+                          className="bg-white/50 dark:bg-black/30 min-h-[320px] text-base leading-relaxed border-white/20 p-4 font-sans" 
+                        />
                       </div>
-                      <span className="text-muted-foreground italic text-[11px]">
-                        (Automaticky se odešle jako PDF příloha přes SMTP)
-                      </span>
-                    </div>
-                  </div>
 
-                  {/* PŘEDMĚT E-MAILU */}
-                  <div className="space-y-2">
-                    <label className="text-sm font-semibold flex items-center justify-between">
-                      <span>Předmět e-mailu</span>
-                      <span className="text-xs text-muted-foreground font-normal">Předmět zprávy</span>
-                    </label>
-                    <Input 
-                      value={emailSubject}
-                      onChange={(e) => setEmailSubject(e.target.value)}
-                      className="bg-white/50 dark:bg-black/30 text-base py-3 h-auto border-white/20 font-medium" 
-                    />
-                  </div>
+                      {/* STAV ODESLÁNÍ */}
+                      {isSent && (
+                        <div className="p-4 rounded-xl bg-green-500/10 border border-green-500/30 text-green-700 dark:text-green-300 flex items-center gap-3 text-sm">
+                          <CheckCircle2 className="w-5 h-5 shrink-0" />
+                          <span>E-mail pro tuto pozici byl úspěšně odeslán přes SMTP server.</span>
+                        </div>
+                      )}
 
-                  {/* TĚLO E-MAILU */}
-                  <div className="space-y-2">
-                    <div className="flex items-center justify-between">
-                      <label className="text-sm font-semibold">Tělo e-mailu (Upravte dle potřeby)</label>
-                      <button
-                        type="button"
-                        onClick={handleCopyBody}
-                        className="text-xs text-primary hover:underline inline-flex items-center gap-1 font-medium"
-                      >
-                        {copied ? <Check className="w-3 h-3 text-green-500" /> : null}
-                        {copied ? "Zkopírováno!" : "Kopírovat text"}
-                      </button>
-                    </div>
-                    <Textarea 
-                      value={emailBody} 
-                      onChange={(e) => setEmailBody(e.target.value)}
-                      className="bg-white/50 dark:bg-black/30 min-h-[320px] text-base leading-relaxed border-white/20 p-4 font-sans" 
-                    />
-                  </div>
+                      {/* AKČNÍ PANEL POD TEXTEM */}
+                      <div className="flex flex-wrap items-center justify-between gap-4 pt-2">
+                        <Button 
+                          variant="outline"
+                          disabled={isGenerating || isSending}
+                          onClick={() => generateMutation.mutate(job.id)}
+                          className="gap-2 bg-white/40 dark:bg-black/30 border-white/20"
+                        >
+                          <RefreshCw className={cn("w-4 h-4", isGenerating && "animate-spin")} />
+                          Znovu vygenerovat s AI
+                        </Button>
 
-                  {/* STAV ODESLÁNÍ */}
-                  {isSent && (
-                    <div className="p-4 rounded-xl bg-green-500/10 border border-green-500/30 text-green-700 dark:text-green-300 flex items-center gap-3 text-sm">
-                      <CheckCircle2 className="w-5 h-5 shrink-0" />
-                      <span>E-mail pro tuto pozici byl úspěšně odeslán přes SMTP server.</span>
+                        <Button 
+                          size="lg"
+                          disabled={isSending || isGenerating}
+                          onClick={() => {
+                            const targetEmail = recipientEmail.trim()
+                            if (!targetEmail || !targetEmail.includes("@")) {
+                              alert("Zadejte prosím platnou e-mailovou adresu firmy / HR v poli 'Komu' před odesláním.")
+                              return
+                            }
+                            sendEmailMutation.mutate({
+                              jobId: job.id,
+                              recipient: targetEmail,
+                              subject: emailSubject,
+                              body: emailBody
+                            })
+                          }}
+                          className="gap-2 px-8 bg-primary text-primary-foreground font-semibold shadow-lg hover:shadow-primary/25 hover:scale-[1.02] transition-all"
+                        >
+                          {isSending ? (
+                            <Loader2 className="w-4 h-4 animate-spin" />
+                          ) : (
+                            <Send className="w-4 h-4" />
+                          )}
+                          {isSending ? "Odesílám přes SMTP..." : isSent ? "Odeslat znovu přes SMTP" : "Poslat e-mail přes SMTP"}
+                        </Button>
+                      </div>
                     </div>
                   )}
+                </div>
+              )}
 
-                  {/* AKČNÍ PANEL POD TEXTEM */}
-                  <div className="flex flex-wrap items-center justify-between gap-4 pt-2">
-                    <Button 
-                      variant="outline"
-                      disabled={isGenerating || isSending}
-                      onClick={() => generateMutation.mutate(job.id)}
-                      className="gap-2 bg-white/40 dark:bg-black/30 border-white/20"
-                    >
-                      <RefreshCw className={cn("w-4 h-4", isGenerating && "animate-spin")} />
-                      Znovu vygenerovat s AI
-                    </Button>
+              {/* OBSAH ZÁLOŽKY 2: COLD OUTREACH PRO HIRING MANAGERA */}
+              {copilotTab === "outreach" && (
+                <div className="space-y-6">
+                  {/* POPIS A VOLITELNÝ CUSTOM FOCUS */}
+                  <div className="p-5 rounded-2xl border border-white/20 bg-white/60 dark:bg-black/40 backdrop-blur-xl shadow-sm space-y-4">
+                    <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+                      <div>
+                        <h4 className="font-semibold text-base flex items-center gap-2">
+                          <MessageSquare className="w-4 h-4 text-primary" />
+                          <span>Zpráva pro Hiring Managera / Tech Leada</span>
+                        </h4>
+                        <p className="text-xs text-muted-foreground mt-0.5">
+                          Stručná, úderná zpráva (100–160 slov) pro LinkedIn InMail nebo přímý e-mail. Propojuje výzvy inzerátu s vašimi technologickými úspěchy.
+                        </p>
+                      </div>
 
-                    <Button 
-                      size="lg"
-                      disabled={isSending || isGenerating}
-                      onClick={() => {
-                        const targetEmail = recipientEmail.trim()
-                        if (!targetEmail || !targetEmail.includes("@")) {
-                          alert("Zadejte prosím platnou e-mailovou adresu firmy / HR v poli 'Komu' před odesláním.")
-                          return
-                        }
-                        sendEmailMutation.mutate({
-                          jobId: job.id,
-                          recipient: targetEmail,
-                          subject: emailSubject,
-                          body: emailBody
-                        })
-                      }}
-                      className="gap-2 px-8 bg-primary text-primary-foreground font-semibold shadow-lg hover:shadow-primary/25 hover:scale-[1.02] transition-all"
-                    >
-                      {isSending ? (
-                        <Loader2 className="w-4 h-4 animate-spin" />
-                      ) : (
-                        <Send className="w-4 h-4" />
+                      {hasGeneratedOutreach && (
+                        <Button
+                          variant="ghost"
+                          size="sm"
+                          disabled={isOutreachGenerating}
+                          onClick={() => outreachMutation.mutate({ jobId: job.id, focus: customFocus })}
+                          className="h-8 gap-1.5 text-primary hover:text-primary hover:bg-primary/10 shrink-0 cursor-pointer"
+                        >
+                          {isOutreachGenerating ? (
+                            <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                          ) : (
+                            <RefreshCw className="w-3.5 h-3.5" />
+                          )}
+                          Přegenerovat s AI
+                        </Button>
                       )}
-                      {isSending ? "Odesílám přes SMTP..." : isSent ? "Odeslat znovu přes SMTP" : "Poslat e-mail přes SMTP"}
-                    </Button>
+                    </div>
+
+                    {/* Vstup pro volitelný custom focus */}
+                    <div className="pt-2 border-t border-black/5 dark:border-white/5 space-y-1.5">
+                      <label className="text-xs font-semibold text-muted-foreground flex items-center justify-between">
+                        <span>Klíčové zaměření / úhel zprávy (volitelné):</span>
+                        <span className="text-[11px] text-muted-foreground font-normal">např. latence, distribuované systémy, FastAPI</span>
+                      </label>
+                      <Input
+                        placeholder="např. Optimalizace propustnosti pipeline, asynchronní zpracování, PostgreSQL výkon"
+                        value={customFocus}
+                        onChange={(e) => setCustomFocus(e.target.value)}
+                        className="bg-white/50 dark:bg-black/30 border-white/10 text-sm h-9"
+                        disabled={isOutreachGenerating}
+                      />
+                    </div>
                   </div>
+
+                  {/* STAV 1: Probíhá generování cold outreach */}
+                  {isOutreachGenerating ? (
+                    <div className="p-8 rounded-2xl border border-primary/30 bg-primary/5 dark:bg-primary/10 flex flex-col items-center justify-center text-center gap-4 py-16 animate-pulse">
+                      <div className="w-14 h-14 rounded-2xl bg-primary/20 flex items-center justify-center text-primary shadow-inner">
+                        <Loader2 className="w-7 h-7 animate-spin" />
+                      </div>
+                      <div>
+                        <h4 className="font-bold text-lg">AI sestavuje cold outreach zprávu...</h4>
+                        <p className="text-sm text-muted-foreground mt-1 max-w-md">
+                          Propojujeme technologické výzvy inzerátu s vašimi úspěchy v životopisu s důrazem na rozsah 100–160 slov.
+                        </p>
+                      </div>
+                    </div>
+                  ) : !hasGeneratedOutreach ? (
+                    /* STAV 2: Zatím nevygenerováno */
+                    <div className="p-8 rounded-2xl border border-white/20 bg-white/40 dark:bg-black/30 flex flex-col items-center justify-center text-center gap-5 py-12 shadow-sm backdrop-blur-xl">
+                      <div className="w-14 h-14 rounded-2xl bg-primary/10 flex items-center justify-center text-primary shadow-sm">
+                        <Sparkles className="w-7 h-7" />
+                      </div>
+                      <div className="max-w-md">
+                        <h4 className="font-bold text-xl mb-1">Cílený Cold Outreach na Hiring Managera</h4>
+                        <p className="text-sm text-muted-foreground leading-relaxed">
+                          AI vytvoří vysoce personalizovanou zprávu (100–160 slov) přímo pro vedoucího vývoje nebo hiring manažera. Zpráva vyzdvihne přesně ty technologie, které firma v inzerátu poptává.
+                        </p>
+                      </div>
+
+                      <Button
+                        size="lg"
+                        disabled={isOutreachGenerating}
+                        onClick={() => outreachMutation.mutate({ jobId: job.id, focus: customFocus })}
+                        className="gap-2 px-8 h-12 text-base font-semibold shadow-lg hover:shadow-primary/25 hover:scale-[1.02] transition-all bg-primary text-primary-foreground cursor-pointer"
+                      >
+                        <Sparkles className="w-5 h-5" />
+                        Vygenerovat zprávu pro Hiring Managera
+                      </Button>
+                    </div>
+                  ) : (
+                    /* STAV 3: Vygenerováno -> Textarea, Word Count indikátor a One-click Copy */
+                    <div className="space-y-4">
+                      <div className="flex flex-wrap items-center justify-between gap-3">
+                        <div className="flex items-center gap-2.5">
+                          <label className="text-sm font-semibold">Text zprávy (upravte dle potřeby):</label>
+                          {/* Live word count indicator */}
+                          {isWordCountInRange ? (
+                            <span className="inline-flex items-center gap-1 text-xs px-2.5 py-0.5 rounded-full bg-green-500/10 text-green-600 dark:text-green-400 font-semibold border border-green-500/20">
+                              <Check className="w-3 h-3" />
+                              {outreachWords} slov (Ideální: 100–160)
+                            </span>
+                          ) : outreachWords < 100 ? (
+                            <span className="inline-flex items-center gap-1 text-xs px-2.5 py-0.5 rounded-full bg-amber-500/10 text-amber-600 dark:text-amber-400 font-medium border border-amber-500/20">
+                              <AlertTriangle className="w-3 h-3" />
+                              {outreachWords} slov (Cíl: 100–160, chybí {100 - outreachWords})
+                            </span>
+                          ) : (
+                            <span className="inline-flex items-center gap-1 text-xs px-2.5 py-0.5 rounded-full bg-red-500/10 text-red-600 dark:text-red-400 font-medium border border-red-500/20">
+                              <AlertTriangle className="w-3 h-3" />
+                              {outreachWords} slov (Cíl: 100–160, přebývá {outreachWords - 160})
+                            </span>
+                          )}
+                        </div>
+
+                        {/* One-click copy button with feedback */}
+                        <Button
+                          variant="outline"
+                          size="sm"
+                          onClick={handleCopyOutreach}
+                          className="gap-1.5 h-8 bg-white/60 dark:bg-black/40 border-white/20 hover:bg-primary/10 hover:text-primary transition-colors font-medium text-xs cursor-pointer"
+                        >
+                          {outreachCopied ? (
+                            <>
+                              <Check className="w-3.5 h-3.5 text-green-500" />
+                              <span className="text-green-600 dark:text-green-400 font-semibold">Zkopírováno!</span>
+                            </>
+                          ) : (
+                            <>
+                              <Copy className="w-3.5 h-3.5" />
+                              <span>Zkopírovat do schránky</span>
+                            </>
+                          )}
+                        </Button>
+                      </div>
+
+                      <Textarea
+                        value={outreachMessage}
+                        onChange={(e) => setOutreachMessage(e.target.value)}
+                        className="bg-white/50 dark:bg-black/30 min-h-[280px] text-base leading-relaxed border-white/20 p-4 font-sans focus:border-primary/50"
+                        placeholder="Zde se zobrazí vygenerovaná cold outreach zpráva..."
+                      />
+
+                      <div className="flex flex-wrap items-center justify-between gap-3 pt-1">
+                        <Button
+                          variant="outline"
+                          size="sm"
+                          disabled={isOutreachGenerating}
+                          onClick={() => outreachMutation.mutate({ jobId: job.id, focus: customFocus })}
+                          className="gap-2 bg-white/40 dark:bg-black/30 border-white/20 text-xs cursor-pointer"
+                        >
+                          <RefreshCw className={cn("w-3.5 h-3.5", isOutreachGenerating && "animate-spin")} />
+                          Znovu vygenerovat s AI
+                        </Button>
+
+                        <div className="flex items-center gap-2 text-xs text-muted-foreground">
+                          <span>💡 Zkopírujte a odešlete na LinkedInu jako InMail nebo přímou zprávu Tech Leadovi.</span>
+                        </div>
+                      </div>
+                    </div>
+                  )}
+                </div>
+              )}
+
+              {/* OBSAH ZÁLOŽKY 3: ATS CV NA MÍRU */}
+              {copilotTab === "cv" && (
+                <div className="space-y-6">
+                  <div className="p-6 rounded-2xl border border-white/20 bg-white/60 dark:bg-black/40 backdrop-blur-xl shadow-sm space-y-4">
+                    <div className="flex items-center gap-3">
+                      <div className="w-10 h-10 rounded-xl bg-amber-500/10 flex items-center justify-center text-amber-500">
+                        <FileText className="w-5 h-5" />
+                      </div>
+                      <div>
+                        <h4 className="font-semibold text-lg">Dynamické 1-stránkové ATS CV na míru</h4>
+                        <p className="text-xs text-muted-foreground">
+                          Algoritmus vybere nejrelevantnější projekty a přeformuluje odrážky zkušeností do formátu STAR s důrazem na klíčová slova tohoto inzerátu.
+                        </p>
+                      </div>
+                    </div>
+
+                    <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 pt-2">
+                      <div className="p-3 rounded-xl bg-black/5 dark:bg-white/5 border border-black/5 dark:border-white/5 text-center">
+                        <span className="text-xs font-semibold block text-foreground">1 stránka A4</span>
+                        <span className="text-[11px] text-muted-foreground">Přísné dodržení limitu</span>
+                      </div>
+                      <div className="p-3 rounded-xl bg-black/5 dark:bg-white/5 border border-black/5 dark:border-white/5 text-center">
+                        <span className="text-xs font-semibold block text-foreground">100% selektovatelný</span>
+                        <span className="text-[11px] text-muted-foreground">Strojově čitelný text</span>
+                      </div>
+                      <div className="p-3 rounded-xl bg-black/5 dark:bg-white/5 border border-black/5 dark:border-white/5 text-center">
+                        <span className="text-xs font-semibold block text-foreground">STAR formát</span>
+                        <span className="text-[11px] text-muted-foreground">Měřitelné výsledky</span>
+                      </div>
+                      <div className="p-3 rounded-xl bg-black/5 dark:bg-white/5 border border-black/5 dark:border-white/5 text-center">
+                        <span className="text-xs font-semibold block text-foreground">ATS Klíčová slova</span>
+                        <span className="text-[11px] text-muted-foreground">Vysoká propustnost</span>
+                      </div>
+                    </div>
+                  </div>
+
+                  {isDownloadingCv ? (
+                    <div className="p-8 rounded-2xl border border-amber-500/30 bg-amber-500/5 dark:bg-amber-500/10 flex flex-col items-center justify-center text-center gap-4 py-16 animate-pulse">
+                      <div className="w-14 h-14 rounded-2xl bg-amber-500/20 flex items-center justify-center text-amber-500 shadow-inner">
+                        <Loader2 className="w-7 h-7 animate-spin" />
+                      </div>
+                      <div>
+                        <h4 className="font-bold text-lg">Generuji a optimalizuji ATS CV na míru (PDF)...</h4>
+                        <p className="text-sm text-muted-foreground mt-1 max-w-md">
+                          Přizpůsobujeme odrážky do formátu STAR, formátujeme na 1 stránku A4 a kompilujeme strojově čitelný PDF soubor.
+                        </p>
+                      </div>
+                    </div>
+                  ) : (
+                    <div className="p-8 rounded-2xl border border-white/20 bg-white/40 dark:bg-black/30 flex flex-col items-center justify-center text-center gap-5 py-12 shadow-sm backdrop-blur-xl">
+                      <div className="w-14 h-14 rounded-2xl bg-amber-500/10 flex items-center justify-center text-amber-500 shadow-sm">
+                        <FileText className="w-7 h-7" />
+                      </div>
+                      <div className="max-w-md">
+                        <h4 className="font-bold text-xl mb-1">
+                          {(job as any)?.tailored_cv_path ? "Přizpůsobené ATS CV je připraveno" : "Vygenerovat přizpůsobené ATS CV (PDF)"}
+                        </h4>
+                        <p className="text-sm text-muted-foreground leading-relaxed">
+                          {(job as any)?.tailored_cv_path
+                            ? "Životopis na míru byl pro tuto pozici úspěšně vytvořen. Můžete jej přímo stáhnout jedním kliknutím nebo přegenerovat."
+                            : "Sestaví z vašeho profilu a textu pozice validní, strojově čitelné 1-stránkové PDF připravené k okamžitému odeslání."}
+                        </p>
+                      </div>
+
+                      {(job as any)?.tailored_cv_path && (
+                        <div className="inline-flex items-center gap-2 px-3 py-1.5 rounded-full bg-green-500/10 border border-green-500/20 text-green-600 dark:text-green-400 text-xs font-semibold">
+                          <Check className="w-3.5 h-3.5" />
+                          <span>PDF zkompilováno na 1 stránku A4 (strojově čitelný text)</span>
+                        </div>
+                      )}
+
+                      <div className="flex flex-wrap items-center justify-center gap-3 pt-2">
+                        <Button
+                          size="lg"
+                          disabled={isDownloadingCv}
+                          onClick={handleDownloadTailoredCv}
+                          className="gap-2 px-8 h-12 text-base font-semibold shadow-lg hover:shadow-amber-500/25 hover:scale-[1.02] transition-all bg-amber-500 text-white hover:bg-amber-600 cursor-pointer"
+                        >
+                          {isDownloadingCv ? (
+                            <Loader2 className="w-5 h-5 animate-spin" />
+                          ) : (
+                            <Download className="w-5 h-5" />
+                          )}
+                          <span>Stáhnout ATS CV na míru (PDF)</span>
+                        </Button>
+
+                        {(job as any)?.tailored_cv_path && (
+                          <Button
+                            variant="outline"
+                            size="lg"
+                            disabled={isDownloadingCv}
+                            onClick={handleDownloadTailoredCv}
+                            className="gap-2 h-12 bg-white/50 dark:bg-black/40 border-white/20 text-xs cursor-pointer hover:bg-white/70 dark:hover:bg-black/60"
+                          >
+                            <RefreshCw className="w-4 h-4" />
+                            <span>Přegenerovat</span>
+                          </Button>
+                        )}
+                      </div>
+                    </div>
+                  )}
                 </div>
               )}
             </section>

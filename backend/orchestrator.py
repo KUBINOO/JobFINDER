@@ -1,7 +1,7 @@
 import os
 import logging
 import traceback
-from typing import Optional
+from typing import Optional, List
 from datetime import datetime, timezone
 
 
@@ -169,6 +169,52 @@ def _get_llm_setup(session: Session, application: Application):
             
     return full_user_context, llm_model, api_key, ollama_host, tone_of_voice
 
+async def _trigger_discord_alert_if_high_match(application: Application) -> bool:
+    """
+    Odešle Discord Webhook notifikaci pro nabídku s vysokou shodou (match_score >= 85 %).
+    Extrahuje informace o pozici, společnosti, platu, lokalitě a až 3 PROs.
+    """
+    import json
+    try:
+        from services.discord_service import send_discord_high_match_alert
+
+        job = application.job_posting
+        if not job:
+            logger.warning(f"Nelze odeslat Discord alert pro žádost {application.id}: chybí job_posting.")
+            return False
+
+        # Získání PROs seznamu
+        pros_list: List[str] = []
+        if application.pros:
+            try:
+                parsed = json.loads(application.pros)
+                if isinstance(parsed, list):
+                    pros_list = [str(p) for p in parsed]
+                elif isinstance(parsed, str):
+                    pros_list = [parsed]
+            except Exception:
+                pros_list = [str(application.pros)]
+
+        # Fallback na match_reason pokud pros nejsou v databázi
+        if not pros_list and application.match_reason:
+            pros_list = [application.match_reason]
+
+        location = job.remote_policy or getattr(job, "raw_location", None) or "Lokalita neuvedena / Remote"
+        salary = job.salary_info
+
+        return await send_discord_high_match_alert(
+            job_title=job.title or "Neznámá pozice",
+            company=job.company_name or "Neznámá společnost",
+            location=location,
+            salary=salary,
+            match_score=application.match_score or 0,
+            pros=pros_list,
+            source_url=job.source_url or "",
+        )
+    except Exception as e:
+        logger.warning(f"Chyba při spouštění Discord notifikace pro žádost {application.id}: {e}")
+        return False
+
 async def _run_matching(session: Session, application: Application) -> None:
     """Samostatné rychlé vyhodnocení shody (Match score & Reason) bez generování dopisu."""
     import json
@@ -181,6 +227,7 @@ async def _run_matching(session: Session, application: Application) -> None:
         job.source_portal not in ("Jobs.cz", "Prace.cz", "StartupJobs.cz", "Profesia.cz", "Volnamista.cz")
     )
 
+    evaluated_by_global = False
     if is_global_portal:
         try:
             from agents.evaluator import CandidateFitAgent
@@ -216,22 +263,32 @@ async def _run_matching(session: Session, application: Application) -> None:
             
             session.add(application)
             session.commit()
-            return
+            evaluated_by_global = True
         except Exception as e:
             logger.warning(f"CandidateFitAgent selhal, zkouším fallback na JobMatcher: {e}")
 
-    # Fallback / Stávající vyhodnocení pro české portály
-    matcher = JobMatcher(model=llm_model, api_key=api_key if api_key else None, api_base=ollama_host)
-    res = await matcher.evaluate_match(
-        user_cv=full_user_context,
-        job_desc=job.description or "Popis pozice není k dispozici.",
-        job_title=job.title or job.company_name or "Neznámá pozice"
-    )
-    
-    application.match_score = res.match_score
-    application.match_reason = res.match_reason
-    session.add(application)
-    session.commit()
+    if not evaluated_by_global:
+        # Fallback / Stávající vyhodnocení pro české portály
+        matcher = JobMatcher(model=llm_model, api_key=api_key if api_key else None, api_base=ollama_host)
+        res = await matcher.evaluate_match(
+            user_cv=full_user_context,
+            job_desc=job.description or "Popis pozice není k dispozici.",
+            job_title=job.title or job.company_name or "Neznámá pozice"
+        )
+        
+        application.match_score = res.match_score
+        application.match_reason = res.match_reason
+        if getattr(res, "pros", None):
+            application.pros = json.dumps(res.pros, ensure_ascii=False)
+        if getattr(res, "cons", None):
+            application.cons = json.dumps(res.cons, ensure_ascii=False)
+        session.add(application)
+        session.commit()
+
+    # Automatický Discord Webhook Alert pro pozice se skóre >= 85 %
+    if application.match_score is not None and application.match_score >= 85:
+        await _trigger_discord_alert_if_high_match(application)
+
 
 async def evaluate_single_match(application_id: int) -> None:
     """Samostatné vyhodnocení shody (Match Score & Reason) pro jednu pozici."""
@@ -322,6 +379,9 @@ async def _run_llm_generation(session: Session, application: Application) -> Non
     
     session.add(application)
     session.commit()
+
+    if application.match_score is not None and application.match_score >= 85:
+        await _trigger_discord_alert_if_high_match(application)
 
 async def _run_sending(
     session: Session, 

@@ -48,3 +48,7 @@ Thumbs.db
 scratch/
 temp/
 *.log
+.agents/
+ORIGINAL_REQUEST.md
+TEST_INFRA.md
+TEST_READY.md

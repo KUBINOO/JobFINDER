@@ -3,9 +3,24 @@ from fastapi.middleware.cors import CORSMiddleware
 from sqlmodel import Session
 from database import engine, create_db_and_tables
 from routers import settings, upload, applications
+from sqlalchemy import text
 
 # Inicializace databáze SQLite
 create_db_and_tables()
+
+# Migrace sloupců pro existující SQLite databázi
+try:
+    with engine.connect() as conn:
+        cursor = conn.execute(text("PRAGMA table_info(application)"))
+        cols = [row[1] for row in cursor.fetchall()]
+        if cols and "outreach_message" not in cols:
+            conn.execute(text("ALTER TABLE application ADD COLUMN outreach_message TEXT"))
+            conn.commit()
+        if cols and "tailored_cv_path" not in cols:
+            conn.execute(text("ALTER TABLE application ADD COLUMN tailored_cv_path TEXT"))
+            conn.commit()
+except Exception:
+    pass
 
 app = FastAPI(title="Job Application Automation API")
 

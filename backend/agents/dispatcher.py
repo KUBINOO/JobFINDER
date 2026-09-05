@@ -12,7 +12,8 @@ from .workers import (
     RemotiveWorker, 
     WeWorkRemotelyWorker, 
     ArbeitnowWorker,
-    JobicyWorker
+    JobicyWorker,
+    JobSpyWorker
 )
 
 logger = logging.getLogger(__name__)
@@ -32,6 +33,7 @@ class DispatcherAgent:
             WeWorkRemotelyWorker(),
             ArbeitnowWorker(),
             JobicyWorker(),
+            JobSpyWorker(),
         ]
 
     async def execute_search(
@@ -57,20 +59,41 @@ class DispatcherAgent:
         tasks = []
         worker_names = []
 
-        # 1. Spuštění globálních API workerů
+        # 1. Spuštění globálních API a multi-platformních workerů
         if state.market in ("global", "hybrid"):
             for w in self.global_workers:
+                worker_timeout = getattr(w, "timeout", 14.0)
+                kwargs = {
+                    "query": query, 
+                    "limit": per_worker_limit, 
+                    "part_time_only": part_time_only
+                }
+                if isinstance(w, JobSpyWorker):
+                    kwargs["market"] = state.market
                 tasks.append(
                     asyncio.wait_for(
-                        w.fetch_jobs(
-                            query=query, 
-                            limit=per_worker_limit, 
-                            part_time_only=part_time_only
-                        ),
-                        timeout=14.0
+                        w.fetch_jobs(**kwargs),
+                        timeout=max(worker_timeout, 14.0)
                     )
                 )
                 worker_names.append(w.name)
+        elif state.market == "cz":
+            # Pro trh cz spouštíme JobSpyWorker s českou lokalizací (LinkedIn, Indeed v ČR)
+            for w in self.global_workers:
+                if isinstance(w, JobSpyWorker):
+                    worker_timeout = getattr(w, "timeout", 25.0)
+                    tasks.append(
+                        asyncio.wait_for(
+                            w.fetch_jobs(
+                                query=query,
+                                limit=per_worker_limit,
+                                part_time_only=part_time_only,
+                                market="cz"
+                            ),
+                            timeout=max(worker_timeout, 14.0)
+                        )
+                    )
+                    worker_names.append(w.name)
 
         # 2. Spuštění českého scraperu (pokud je zvolen trh "cz" nebo "hybrid")
         if state.market in ("cz", "hybrid"):

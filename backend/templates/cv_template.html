@@ -1,0 +1,285 @@
+<!DOCTYPE html>
+<html lang="cs">
+<head>
+<meta charset="utf-8"/>
+<title>{{ candidate.name }} - ATS CV - {{ job.title }}</title>
+<style>
+@page {
+    size: A4 portrait;
+    margin: {{ margin_top|default('7mm') }} {{ margin_right|default('10mm') }} {{ margin_bottom|default('7mm') }} {{ margin_left|default('10mm') }};
+}
+
+body {
+    font-family: 'ArialCustom', Helvetica, Arial, sans-serif;
+    font-size: {{ base_font_size|default('8.8pt') }};
+    line-height: {{ line_height|default('1.22') }};
+    color: #1a202c;
+    background-color: #ffffff;
+    margin: 0;
+    padding: 0;
+}
+
+/* Hlavička životopisu */
+.header-container {
+    text-align: center;
+    margin-bottom: {{ header_margin_bottom|default('5pt') }};
+    padding-bottom: 2pt;
+    border-bottom: 1.2pt solid #2d3748;
+}
+
+.candidate-name {
+    font-size: {{ name_font_size|default('15pt') }};
+    font-weight: bold;
+    text-transform: uppercase;
+    letter-spacing: 0.8pt;
+    color: #1a202c;
+    margin: 0 0 2pt 0;
+}
+
+.contact-info {
+    font-size: {{ contact_font_size|default('8pt') }};
+    color: #4a5568;
+    margin: 0 0 2pt 0;
+}
+
+.contact-separator {
+    color: #a0aec0;
+    padding: 0 3pt;
+}
+
+.target-badge {
+    font-size: {{ badge_font_size|default('8pt') }};
+    font-weight: bold;
+    color: #2b6cb0;
+    margin-top: 1pt;
+}
+
+/* Sekce */
+.section {
+    margin-top: {{ section_margin_top|default('5pt') }};
+    margin-bottom: {{ section_margin_bottom|default('3pt') }};
+}
+
+.section-heading {
+    font-size: {{ heading_font_size|default('9.5pt') }};
+    font-weight: bold;
+    text-transform: uppercase;
+    letter-spacing: 0.4pt;
+    color: #1a202c;
+    border-bottom: 0.8pt solid #cbd5e0;
+    padding-bottom: 1pt;
+    margin: 0 0 3pt 0;
+}
+
+/* Profesní profil */
+.summary-text {
+    margin: 0 0 2pt 0;
+    text-align: justify;
+    font-size: {{ base_font_size|default('8.8pt') }};
+    color: #2d3748;
+}
+
+/* Tabulka dovedností */
+.skills-table {
+    width: 100%;
+    margin-top: 1pt;
+    margin-bottom: 2pt;
+}
+
+.skills-table td {
+    padding: 1pt 0;
+    vertical-align: top;
+    font-size: {{ base_font_size|default('8.8pt') }};
+}
+
+.skill-category {
+    font-weight: bold;
+    color: #2d3748;
+    width: 24%;
+}
+
+.skill-items {
+    color: #4a5568;
+    width: 76%;
+}
+
+/* Položky zkušeností a projektů */
+.entry-block {
+    margin-bottom: {{ entry_margin_bottom|default('3.5pt') }};
+}
+
+.entry-header-table {
+    width: 100%;
+    margin-bottom: 1pt;
+}
+
+.entry-title {
+    font-weight: bold;
+    color: #1a202c;
+    font-size: {{ entry_title_size|default('9pt') }};
+    text-align: left;
+}
+
+.entry-company {
+    font-weight: normal;
+    font-style: italic;
+    color: #4a5568;
+}
+
+.entry-meta {
+    font-size: {{ meta_font_size|default('7.8pt') }};
+    color: #718096;
+    text-align: right;
+    white-space: nowrap;
+}
+
+/* Odrážky ve formátu STAR */
+ul.star-bullets {
+    margin: 1pt 0 2pt 13pt;
+    padding: 0;
+}
+
+ul.star-bullets li {
+    margin-bottom: {{ bullet_margin_bottom|default('1.5pt') }};
+    font-size: {{ base_font_size|default('8.8pt') }};
+    color: #2d3748;
+    text-align: justify;
+}
+
+.star-tag {
+    font-weight: bold;
+    color: #2b6cb0;
+}
+
+.tech-highlight {
+    font-weight: bold;
+    color: #1a202c;
+}
+
+/* Vzdělání */
+.education-text {
+    font-size: {{ meta_font_size|default('8pt') }};
+    color: #4a5568;
+    margin: 0;
+}
+
+/* Doplňující informace */
+.footer-table {
+    width: 100%;
+    margin-top: 1pt;
+}
+
+.footer-table td {
+    padding: 0.5pt 0;
+    font-size: {{ base_font_size|default('8.8pt') }};
+    color: #2d3748;
+}
+</style>
+</head>
+<body>
+
+<!-- HLAVIČKA -->
+<div class="header-container">
+    <div class="candidate-name">{{ candidate.name }}</div>
+    <div class="contact-info">
+        {{ candidate.location }}
+        <span class="contact-separator">|</span>
+        {{ candidate.phone }}
+        <span class="contact-separator">|</span>
+        {{ candidate.email }}
+        <span class="contact-separator">|</span>
+        {{ candidate.linkedin }}
+        <span class="contact-separator">|</span>
+        {{ candidate.github }}
+    </div>
+    {% if job and job.title %}
+    <div class="target-badge">
+        Cíleno na pozici: {{ job.title }} &bull; {{ job.company }}
+    </div>
+    {% endif %}
+</div>
+
+<!-- PROFESNÍ PROFIL -->
+<div class="section">
+    <div class="section-heading">Profesní profil</div>
+    <p class="summary-text">{{ tailored_summary }}</p>
+</div>
+
+<!-- TECHNICKÉ DOVEDNOSTI S DŮRAZEM NA INZERÁT -->
+<div class="section">
+    <div class="section-heading">Technické dovednosti &amp; Nástroje</div>
+    <table class="skills-table">
+        <tr>
+            <td class="skill-category">Cílové technologie &amp; Stack:</td>
+            <td class="skill-items">{{ target_technologies }}</td>
+        </tr>
+        <tr>
+            <td class="skill-category">Backend &amp; Datové pipeline:</td>
+            <td class="skill-items">{{ backend_skills }}</td>
+        </tr>
+        <tr>
+            <td class="skill-category">Databáze, Cloud &amp; DevOps:</td>
+            <td class="skill-items">{{ database_devops_skills }}</td>
+        </tr>
+        <tr>
+            <td class="skill-category">Frontend &amp; Další nástroje:</td>
+            <td class="skill-items">{{ other_skills }}</td>
+        </tr>
+    </table>
+</div>
+
+<!-- PRACOVNÍ ZKUŠENOSTI A PROJEKTY (STAR FORMÁT) -->
+<div class="section">
+    <div class="section-heading">Relevantní zkušenosti a projekty</div>
+    {% for exp in experiences %}
+    <div class="entry-block">
+        <table class="entry-header-table">
+            <tr>
+                <td class="entry-title">
+                    {{ exp.title }} <span class="entry-company">| {{ exp.organization }}</span>
+                </td>
+                <td class="entry-meta">{{ exp.period }} | {{ exp.location }}</td>
+            </tr>
+        </table>
+        <ul class="star-bullets">
+            {% for bullet in exp.star_bullets %}
+            <li>
+                <span class="star-tag">{{ bullet.label }}:</span> {{ bullet.text }}
+            </li>
+            {% endfor %}
+        </ul>
+    </div>
+    {% endfor %}
+</div>
+
+<!-- VZDĚLÁNÍ -->
+<div class="section">
+    <div class="section-heading">Vzdělání</div>
+    {% for edu in education %}
+    <div class="entry-block">
+        <table class="entry-header-table">
+            <tr>
+                <td class="entry-title">{{ edu.institution }}</td>
+                <td class="entry-meta">{{ edu.period }} | {{ edu.location }}</td>
+            </tr>
+        </table>
+        <div class="education-text">
+            <strong>{{ edu.degree_field }}</strong>{% if edu.details %}<br/>{{ edu.details }}{% endif %}
+        </div>
+    </div>
+    {% endfor %}
+</div>
+
+<!-- JAZYKY & CERTIFIKACE -->
+<div class="section">
+    <div class="section-heading">Jazyky a doplňující informace</div>
+    <table class="footer-table">
+        <tr>
+            <td style="width: 50%;"><strong>Jazykové znalosti:</strong> {{ languages }}</td>
+            <td style="width: 50%;"><strong>Dostupnost &amp; forma:</strong> {{ availability }}</td>
+        </tr>
+    </table>
+</div>
+
+</body>
+</html>
